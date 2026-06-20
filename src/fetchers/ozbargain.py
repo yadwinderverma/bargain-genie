@@ -22,6 +22,20 @@ from src.fetchers.base import DealFetcher
 
 logger = logging.getLogger(__name__)
 
+# Pre-compile regex patterns to avoid repeated compilation overhead in loops
+FREEBIE_PATTERN = re.compile(
+    r"\bfree\b|\bfreebie\b|\$0\b|free\s+trial|free\s+sub|no\s+cost",
+    re.IGNORECASE,
+)
+LIMITED_DURATION_PATTERN = re.compile(
+    r"\d+\s*(day|week|month|year)s?\s*free|free\s*trial|limited\s*time",
+    re.IGNORECASE,
+)
+LIFETIME_DURATION_PATTERN = re.compile(
+    r"lifetime|forever|permanent|always\s*free",
+    re.IGNORECASE,
+)
+
 
 _cached_feed = None
 _cached_time = 0
@@ -211,11 +225,7 @@ def _is_freebie(title: str, description: str, tags: list) -> bool:
 
     # Check title for free signals
     text = (title + " " + description).lower()
-    return bool(re.search(
-        r"\bfree\b|\bfreebie\b|\$0\b|free\s+trial|free\s+sub|no\s+cost",
-        text,
-        re.IGNORECASE,
-    ))
+    return bool(FREEBIE_PATTERN.search(text))
 
 
 class OzBargainFreebieFetcher(DealFetcher):
@@ -253,14 +263,9 @@ class OzBargainFreebieFetcher(DealFetcher):
                     continue
 
                 # Detect duration
-                is_limited = bool(re.search(
-                    r"\d+\s*(day|week|month|year)s?\s*free|free\s*trial|limited\s*time",
-                    title + " " + description, re.IGNORECASE,
-                ))
-                is_lifetime = bool(re.search(
-                    r"lifetime|forever|permanent|always\s*free",
-                    title + " " + description, re.IGNORECASE,
-                ))
+                text_to_search = title + " " + description
+                is_limited = bool(LIMITED_DURATION_PATTERN.search(text_to_search))
+                is_lifetime = bool(LIFETIME_DURATION_PATTERN.search(text_to_search))
                 duration_note = "lifetime" if is_lifetime else ("limited time" if is_limited else "")
 
                 deal = Deal(
