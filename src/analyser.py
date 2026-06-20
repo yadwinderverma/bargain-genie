@@ -54,7 +54,7 @@ class DealAnalyser:
         return genai.Client(api_key=api_key)
 
     def _build_prompt(self, deals: list[Deal]) -> str:
-        deals_text = ""
+        deals_parts = []
         for i, deal in enumerate(deals, 1):
             community_note = ""
             if deal.is_freebie:
@@ -65,7 +65,7 @@ class DealAnalyser:
             elif deal.price_beat_retailer:
                 community_note = " [OFFICEWORKS — 5% Price Beat Guarantee, likely lowest AU price]"
 
-            deals_text += (
+            deals_parts.append(
                 f"\nDeal {i}:{community_note}\n"
                 f"  Title:          {deal.title}\n"
                 f"  Source:         {deal.source}\n"
@@ -75,6 +75,8 @@ class DealAnalyser:
                 f"  OzBargain Votes:{deal.votes}\n"
                 f"  Description:    {deal.description[:200]}\n"
             )
+
+        deals_text = "".join(deals_parts)
 
         return (
             "You are an expert Australian bargain hunter. Rate each deal below.\n\n"
