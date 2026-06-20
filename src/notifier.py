@@ -62,10 +62,12 @@ class SlackNotifier:
                 return emoji
         return "💡"
 
+
     def _format_price(self, price: float | None) -> str:
         if price is None:
             return "N/A"
         return f"${price:,.2f}"
+
 
     def _build_deal_block(self, deal: Deal) -> list[dict]:
         """Build Slack Block Kit blocks for a single deal."""
