@@ -100,7 +100,8 @@ class SlackNotifier:
         if deal.llm_category:
             context_parts.append(f"📦 {deal.llm_category}")
 
-        title_text = f"<{deal.url}|{deal.title}>" if deal.url else deal.title
+        safe_title = deal.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        title_text = f"<{deal.url}|{safe_title}>" if deal.url else safe_title
 
         blocks = [
             {
