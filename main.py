@@ -11,11 +11,11 @@ import sys
 import traceback
 from datetime import datetime, timezone
 
-from src.analyser import analyse_deals
-from src.cache import filter_new_deals, mark_deals_alerted
-from src.fetchers.ozbargain import fetch_ozbargain_deals, fetch_ozbargain_freebies
-from src.fetchers.retailers import fetch_retailer_deals
-from src.notifier import send_slack_alerts, send_slack_error_message, send_slack_no_deals_message
+from src.analyser import DealAnalyser
+from src.cache import DealCache
+from src.fetchers.ozbargain import OzBargainFetcher, OzBargainFreebieFetcher
+from src.fetchers.retailers import RetailerFetcher
+from src.notifier import SlackNotifier
 
 # Configure logging
 logging.basicConfig(
@@ -37,66 +37,73 @@ def run() -> int:
     logger.info("=" * 60)
 
     try:
+        # Initialise components
+        fetchers = [
+            OzBargainFetcher(),
+            OzBargainFreebieFetcher(),
+            RetailerFetcher(),
+        ]
+        cache = DealCache()
+        analyser = DealAnalyser()
+        notifier = SlackNotifier()
+
         # ----------------------------------------------------------------
         # Step 1: Fetch deals from all sources
         # ----------------------------------------------------------------
         logger.info("--- Step 1: Fetching deals ---")
         all_deals = []
 
-        ozb_deals = fetch_ozbargain_deals()
-        logger.info(f"OzBargain deals: {len(ozb_deals)}")
-        all_deals.extend(ozb_deals)
-
-        ozb_freebies = fetch_ozbargain_freebies()
-        logger.info(f"OzBargain freebies: {len(ozb_freebies)}")
-        all_deals.extend(ozb_freebies)
-
-        retailer_deals = fetch_retailer_deals()
-        logger.info(f"Retailers (Shopping): {len(retailer_deals)} deals")
-        all_deals.extend(retailer_deals)
+        for fetcher in fetchers:
+            fetcher_name = fetcher.__class__.__name__
+            try:
+                deals = fetcher.fetch()
+                logger.info(f"{fetcher_name}: {len(deals)} deals")
+                all_deals.extend(deals)
+            except Exception as e:
+                logger.error(f"Error in {fetcher_name}: {e}")
 
         logger.info(f"Total deals fetched: {len(all_deals)}")
 
         if not all_deals:
             logger.info("No deals found from any source")
-            send_slack_no_deals_message()
+            notifier.send_slack_no_deals_message()
             return 0
 
         # ----------------------------------------------------------------
         # Step 2: Deduplicate against cache (skip already-seen deals)
         # ----------------------------------------------------------------
         logger.info("--- Step 2: Filtering new deals ---")
-        new_deals = filter_new_deals(all_deals)
+        new_deals = cache.filter_new_deals(all_deals)
         logger.info(f"New deals (not seen before): {len(new_deals)}")
 
         if not new_deals:
             logger.info("All deals already seen — nothing new to report")
-            send_slack_no_deals_message()
+            notifier.send_slack_no_deals_message()
             return 0
 
         # ----------------------------------------------------------------
         # Step 3: LLM analysis — score and filter genuine bargains
         # ----------------------------------------------------------------
         logger.info("--- Step 3: LLM analysis ---")
-        quality_deals = analyse_deals(new_deals)
+        quality_deals = analyser.analyse_deals(new_deals)
         logger.info(f"Quality deals after LLM filter: {len(quality_deals)}")
 
         if not quality_deals:
             logger.info("No deals passed LLM quality filter")
-            send_slack_no_deals_message()
+            notifier.send_slack_no_deals_message()
             return 0
 
         # Sort by LLM score descending
-        quality_deals.sort(key=lambda d: d.get("llm_score", 0), reverse=True)
+        quality_deals.sort(key=lambda d: d.llm_score, reverse=True)
 
         # ----------------------------------------------------------------
         # Step 4: Send to Slack
         # ----------------------------------------------------------------
         logger.info("--- Step 4: Sending Slack alerts ---")
-        success = send_slack_alerts(quality_deals)
+        success = notifier.send_slack_alerts(quality_deals)
 
         if success:
-            mark_deals_alerted(quality_deals)
+            cache.mark_deals_alerted(quality_deals)
             logger.info(f"Successfully alerted {len(quality_deals)} deals to Slack")
         else:
             logger.error("Slack notification failed")
@@ -118,7 +125,10 @@ def run() -> int:
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
         logger.error(f"Unhandled error:\n{error_msg}")
-        send_slack_error_message(error_msg)
+        try:
+            SlackNotifier().send_slack_error_message(error_msg)
+        except Exception:
+            pass
         return 1
 
 
