@@ -16,6 +16,8 @@ from config import (
     OZBARGAIN_RSS_URL, OZBARGAIN_TRUSTED, OZBARGAIN_MIN_VOTES_TRUSTED,
     SEARCH_QUERIES, OZBARGAIN_FREEBIES_ENABLED, OZBARGAIN_FREEBIES_MIN_VOTES,
 )
+from src.models import Deal
+from src.fetchers.base import DealFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -91,81 +93,83 @@ def _matches_search_queries(title: str, description: str) -> bool:
     return False
 
 
+class OzBargainFetcher(DealFetcher):
+    def fetch(self) -> list[Deal]:
+        """
+        Fetch and parse deals from OzBargain RSS feed.
+        Returns a list of Deal objects.
+        """
+        logger.info(f"Fetching OzBargain RSS feed: {OZBARGAIN_RSS_URL}")
+        deals = []
+
+        try:
+            feed = feedparser.parse(OZBARGAIN_RSS_URL)
+            if feed.bozo and not feed.entries:
+                logger.error(f"Failed to parse OzBargain RSS: {feed.bozo_exception}")
+                return deals
+
+            logger.info(f"Found {len(feed.entries)} entries in OzBargain feed")
+
+            for entry in feed.entries[:OZBARGAIN_MAX_ITEMS]:
+                title = entry.get("title", "")
+                link = entry.get("link", "")
+                description = entry.get("summary", "")
+                published = entry.get("published", "")
+
+                # Try to extract discount
+                discount_pct = _parse_discount_from_title(title)
+                original_price, sale_price = _parse_price_from_description(description)
+
+                # Calculate discount from prices if not in title
+                if discount_pct is None and original_price and sale_price and original_price > 0:
+                    discount_pct = round((1 - sale_price / original_price) * 100, 1)
+
+                votes = _parse_votes(entry)
+
+                # --- Product filter: only keep deals matching your SEARCH_QUERIES ---
+                if not _matches_search_queries(title, description):
+                    continue
+
+                # Apply filters
+                passes_discount = discount_pct is not None and discount_pct >= MIN_DISCOUNT_PERCENT
+                passes_votes = votes >= MIN_OZBARGAIN_VOTES
+
+                # OzBargain trust logic:
+                if OZBARGAIN_TRUSTED:
+                    community_validated = votes >= OZBARGAIN_MIN_VOTES_TRUSTED
+                    passes = passes_discount or passes_votes or community_validated
+                else:
+                    passes = passes_discount or passes_votes
+
+                if not passes:
+                    continue
+
+                deal = Deal(
+                    id=f"ozb_{entry.get('id', link)}",
+                    source="ozbargain",
+                    title=title,
+                    url=link,
+                    description=description[:500],  # Truncate for LLM
+                    original_price=original_price,
+                    sale_price=sale_price,
+                    discount_pct=discount_pct,
+                    votes=votes,
+                    community_validated=OZBARGAIN_TRUSTED and votes >= OZBARGAIN_MIN_VOTES_TRUSTED,
+                    published=published,
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                )
+                deals.append(deal)
+
+            logger.info(f"OzBargain: {len(deals)} deals passed initial filters")
+
+        except Exception as e:
+            logger.error(f"Error fetching OzBargain deals: {e}", exc_info=True)
+
+        return deals
+
 def fetch_ozbargain_deals() -> list[dict]:
-    """
-    Fetch and parse deals from OzBargain RSS feed.
-    Returns a list of deal dicts.
-    """
-    logger.info(f"Fetching OzBargain RSS feed: {OZBARGAIN_RSS_URL}")
-    deals = []
-
-    try:
-        feed = feedparser.parse(OZBARGAIN_RSS_URL)
-        if feed.bozo and not feed.entries:
-            logger.error(f"Failed to parse OzBargain RSS: {feed.bozo_exception}")
-            return deals
-
-        logger.info(f"Found {len(feed.entries)} entries in OzBargain feed")
-
-        for entry in feed.entries[:OZBARGAIN_MAX_ITEMS]:
-            title = entry.get("title", "")
-            link = entry.get("link", "")
-            description = entry.get("summary", "")
-            published = entry.get("published", "")
-
-            # Try to extract discount
-            discount_pct = _parse_discount_from_title(title)
-            original_price, sale_price = _parse_price_from_description(description)
-
-            # Calculate discount from prices if not in title
-            if discount_pct is None and original_price and sale_price and original_price > 0:
-                discount_pct = round((1 - sale_price / original_price) * 100, 1)
-
-            votes = _parse_votes(entry)
-
-            # --- Product filter: only keep deals matching your SEARCH_QUERIES ---
-            if not _matches_search_queries(title, description):
-                continue
-
-            # Apply filters
-            passes_discount = discount_pct is not None and discount_pct >= MIN_DISCOUNT_PERCENT
-            passes_votes = votes >= MIN_OZBARGAIN_VOTES
-
-            # OzBargain trust logic:
-            # If OZBARGAIN_TRUSTED is on, anything that made it onto OzBargain with
-            # even a handful of votes is worth considering — the community already
-            # filtered out the junk. We don't require a 50% discount here.
-            if OZBARGAIN_TRUSTED:
-                community_validated = votes >= OZBARGAIN_MIN_VOTES_TRUSTED
-                passes = passes_discount or passes_votes or community_validated
-            else:
-                passes = passes_discount or passes_votes
-
-            if not passes:
-                continue
-
-            deal = {
-                "id": f"ozb_{entry.get('id', link)}",
-                "source": "ozbargain",
-                "title": title,
-                "url": link,
-                "description": description[:500],  # Truncate for LLM
-                "original_price": original_price,
-                "sale_price": sale_price,
-                "discount_pct": discount_pct,
-                "votes": votes,
-                "community_validated": OZBARGAIN_TRUSTED and votes >= OZBARGAIN_MIN_VOTES_TRUSTED,
-                "published": published,
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-            }
-            deals.append(deal)
-
-        logger.info(f"OzBargain: {len(deals)} deals passed initial filters")
-
-    except Exception as e:
-        logger.error(f"Error fetching OzBargain deals: {e}", exc_info=True)
-
-    return deals
+    # Legacy wrapper
+    pass
 
 
 def _is_freebie(title: str, description: str, tags: list) -> bool:
@@ -188,70 +192,76 @@ def _is_freebie(title: str, description: str, tags: list) -> bool:
     ))
 
 
+class OzBargainFreebieFetcher(DealFetcher):
+    def fetch(self) -> list[Deal]:
+        """
+        Extract freebies from the main OzBargain deals feed.
+        OzBargain has no separate freebies RSS — freebies are tagged in the main feed.
+        No product filter — all well-upvoted freebies are worth alerting.
+        """
+        if not OZBARGAIN_FREEBIES_ENABLED:
+            return []
+
+        logger.info(f"Scanning OzBargain main feed for freebies: {OZBARGAIN_RSS_URL}")
+        freebies = []
+
+        try:
+            feed = feedparser.parse(OZBARGAIN_RSS_URL)
+            if feed.bozo and not feed.entries:
+                logger.error(f"Failed to parse OzBargain RSS: {feed.bozo_exception}")
+                return freebies
+
+            for entry in feed.entries[:OZBARGAIN_MAX_ITEMS]:
+                title = entry.get("title", "")
+                link = entry.get("link", "")
+                description = entry.get("summary", "")
+                published = entry.get("published", "")
+                tags = entry.get("tags", [])
+                votes = _parse_votes(entry)
+
+                if not _is_freebie(title, description, tags):
+                    continue
+
+                if votes < OZBARGAIN_FREEBIES_MIN_VOTES:
+                    logger.debug(f"Freebie skipped ({votes} votes < {OZBARGAIN_FREEBIES_MIN_VOTES}): {title[:60]}")
+                    continue
+
+                # Detect duration
+                is_limited = bool(re.search(
+                    r"\d+\s*(day|week|month|year)s?\s*free|free\s*trial|limited\s*time",
+                    title + " " + description, re.IGNORECASE,
+                ))
+                is_lifetime = bool(re.search(
+                    r"lifetime|forever|permanent|always\s*free",
+                    title + " " + description, re.IGNORECASE,
+                ))
+                duration_note = "lifetime" if is_lifetime else ("limited time" if is_limited else "")
+
+                deal = Deal(
+                    id=f"ozb_free_{entry.get('id', link)}",
+                    source="ozbargain_freebie",
+                    title=title,
+                    url=link,
+                    description=description[:500],
+                    original_price=None,
+                    sale_price=0.0,
+                    discount_pct=100.0,
+                    votes=votes,
+                    community_validated=True,
+                    is_freebie=True,
+                    duration_note=duration_note,
+                    published=published,
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                )
+                freebies.append(deal)
+
+            logger.info(f"OzBargain freebies: {len(freebies)} found (>= {OZBARGAIN_FREEBIES_MIN_VOTES} votes)")
+
+        except Exception as e:
+            logger.error(f"Error fetching OzBargain freebies: {e}", exc_info=True)
+
+        return freebies
+
 def fetch_ozbargain_freebies() -> list[dict]:
-    """
-    Extract freebies from the main OzBargain deals feed.
-    OzBargain has no separate freebies RSS — freebies are tagged in the main feed.
-    No product filter — all well-upvoted freebies are worth alerting.
-    """
-    if not OZBARGAIN_FREEBIES_ENABLED:
-        return []
-
-    logger.info(f"Scanning OzBargain main feed for freebies: {OZBARGAIN_RSS_URL}")
-    freebies = []
-
-    try:
-        feed = feedparser.parse(OZBARGAIN_RSS_URL)
-        if feed.bozo and not feed.entries:
-            logger.error(f"Failed to parse OzBargain RSS: {feed.bozo_exception}")
-            return freebies
-
-        for entry in feed.entries[:OZBARGAIN_MAX_ITEMS]:
-            title = entry.get("title", "")
-            link = entry.get("link", "")
-            description = entry.get("summary", "")
-            published = entry.get("published", "")
-            tags = entry.get("tags", [])
-            votes = _parse_votes(entry)
-
-            if not _is_freebie(title, description, tags):
-                continue
-
-            if votes < OZBARGAIN_FREEBIES_MIN_VOTES:
-                logger.debug(f"Freebie skipped ({votes} votes < {OZBARGAIN_FREEBIES_MIN_VOTES}): {title[:60]}")
-                continue
-
-            # Detect duration
-            is_limited = bool(re.search(
-                r"\d+\s*(day|week|month|year)s?\s*free|free\s*trial|limited\s*time",
-                title + " " + description, re.IGNORECASE,
-            ))
-            is_lifetime = bool(re.search(
-                r"lifetime|forever|permanent|always\s*free",
-                title + " " + description, re.IGNORECASE,
-            ))
-            duration_note = "lifetime" if is_lifetime else ("limited time" if is_limited else "")
-
-            freebies.append({
-                "id": f"ozb_free_{entry.get('id', link)}",
-                "source": "ozbargain_freebie",
-                "title": title,
-                "url": link,
-                "description": description[:500],
-                "original_price": None,
-                "sale_price": 0.0,
-                "discount_pct": 100.0,
-                "votes": votes,
-                "community_validated": True,
-                "is_freebie": True,
-                "duration_note": duration_note,
-                "published": published,
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-            })
-
-        logger.info(f"OzBargain freebies: {len(freebies)} found (>= {OZBARGAIN_FREEBIES_MIN_VOTES} votes)")
-
-    except Exception as e:
-        logger.error(f"Error fetching OzBargain freebies: {e}", exc_info=True)
-
-    return freebies
+    # Legacy wrapper
+    pass

@@ -20,6 +20,8 @@ from typing import Optional
 import requests
 
 from config import MIN_DISCOUNT_PERCENT, SEARCH_QUERIES, SERPER_ENABLED
+from src.models import Deal
+from src.fetchers.base import DealFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -238,61 +240,66 @@ def _analyse_prices(query: str, results: list[dict]) -> list[dict]:
 
         display_discount = own_discount if own_discount else (vs_median if vs_median > 0 else None)
 
-        deals.append({
-            "id": f"retail_{abs(hash(item['link']))}",
-            "source": item["retailer"].lower().replace(" ", "_"),
-            "title": item["title"],
-            "url": item["link"],
-            "description": (
+        deals.append(Deal(
+            id=f"retail_{abs(hash(item['link']))}",
+            source=item["retailer"].lower().replace(" ", "_"),
+            title=item["title"],
+            url=item["link"],
+            description=(
                 f"{item['title']} at {item['retailer']}. {deal_reason}. "
                 f"Checked {len(trusted)} trusted AU retailers: "
                 f"low=${market_low:.0f}, median=${market_median:.0f}."
             ),
-            "original_price": original_price or market_median,
-            "sale_price": current_price,
-            "discount_pct": display_discount,
-            "votes": 0,
-            "community_validated": False,
-            "price_beat_retailer": is_officeworks,
-            "is_cheapest": is_cheapest,
-            "market_low": market_low,
-            "market_median": market_median,
-            "retailer_count": len(trusted),
-            "deal_reason": deal_reason,
-            "published": "",
-            "fetched_at": now,
-        })
+            original_price=original_price or market_median,
+            sale_price=current_price,
+            discount_pct=display_discount,
+            votes=0,
+            community_validated=False,
+            price_beat_retailer=is_officeworks,
+            is_cheapest=is_cheapest,
+            market_low=market_low,
+            market_median=market_median,
+            retailer_count=len(trusted),
+            deal_reason=deal_reason,
+            published="",
+            fetched_at=now,
+        ))
 
     return deals
 
 
+class RetailerFetcher(DealFetcher):
+    def fetch(self) -> list[Deal]:
+        """
+        For each product in SEARCH_QUERIES, run ONE Google Shopping search.
+        Serper budget: 1 call × len(SEARCH_QUERIES) per run.
+        3 products × 2 runs/day = ~180 calls/month (free tier = 2500/month).
+        """
+        if not SERPER_ENABLED:
+            logger.info("Serper disabled — skipping retailer price check")
+            return []
+
+        api_key = _get_api_key()
+        if not api_key:
+            return []
+
+        all_deals = []
+        seen_urls: set[str] = set()
+
+        for product_query in SEARCH_QUERIES:
+            logger.info(f"Shopping price check: '{product_query}'")
+            results = _fetch_shopping_results(product_query, api_key)
+            deals = _analyse_prices(product_query, results)
+
+            fresh = [d for d in deals if d.url not in seen_urls]
+            seen_urls.update(d.url for d in fresh)
+            all_deals.extend(fresh)
+            logger.info(f"  → {len(fresh)} quality deals for '{product_query}'")
+            time.sleep(0.5)
+
+        logger.info(f"Retailers total: {len(all_deals)} deals across {len(SEARCH_QUERIES)} products")
+        return all_deals
+
 def fetch_retailer_deals() -> list[dict]:
-    """
-    For each product in SEARCH_QUERIES, run ONE Google Shopping search.
-    Serper budget: 1 call × len(SEARCH_QUERIES) per run.
-    3 products × 2 runs/day = ~180 calls/month (free tier = 2500/month).
-    """
-    if not SERPER_ENABLED:
-        logger.info("Serper disabled — skipping retailer price check")
-        return []
-
-    api_key = _get_api_key()
-    if not api_key:
-        return []
-
-    all_deals = []
-    seen_urls: set[str] = set()
-
-    for product_query in SEARCH_QUERIES:
-        logger.info(f"Shopping price check: '{product_query}'")
-        results = _fetch_shopping_results(product_query, api_key)
-        deals = _analyse_prices(product_query, results)
-
-        fresh = [d for d in deals if d["url"] not in seen_urls]
-        seen_urls.update(d["url"] for d in fresh)
-        all_deals.extend(fresh)
-        logger.info(f"  → {len(fresh)} quality deals for '{product_query}'")
-        time.sleep(0.5)
-
-    logger.info(f"Retailers total: {len(all_deals)} deals across {len(SEARCH_QUERIES)} products")
-    return all_deals
+    # Legacy wrapper
+    pass
