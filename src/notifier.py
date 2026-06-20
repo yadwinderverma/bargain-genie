@@ -205,7 +205,10 @@ class SlackNotifier:
                 response.raise_for_status()
                 logger.info(f"Slack message {chunk_idx + 1}/{len(block_chunks)} sent successfully")
             except requests.RequestException as e:
-                logger.error(f"Failed to send Slack message chunk {chunk_idx + 1}: {e}")
+                error_msg = str(e)
+                if self.webhook_url:
+                    error_msg = error_msg.replace(self.webhook_url, "***REDACTED***")
+                logger.error(f"Failed to send Slack message chunk {chunk_idx + 1}: {error_msg}")
                 success = False
 
         return success
@@ -233,7 +236,10 @@ class SlackNotifier:
         try:
             requests.post(self.webhook_url, json=payload, timeout=15)
         except requests.RequestException as e:
-            logger.error(f"Failed to send error message to Slack: {e}")
+            error_msg = str(e)
+            if self.webhook_url:
+                error_msg = error_msg.replace(self.webhook_url, "***REDACTED***")
+            logger.error(f"Failed to send error message to Slack: {error_msg}")
 
 # Legacy functions
 def send_slack_alerts(deals: list[dict]) -> bool:
