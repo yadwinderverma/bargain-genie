@@ -5,6 +5,7 @@ No API key required — OzBargain provides a public RSS feed.
 
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -20,6 +21,19 @@ from src.models import Deal
 from src.fetchers.base import DealFetcher
 
 logger = logging.getLogger(__name__)
+
+
+_cached_feed = None
+_cached_time = 0
+
+def _get_ozbargain_feed():
+    global _cached_feed, _cached_time
+    now = time.time()
+    if _cached_feed is None or now - _cached_time > 60:
+        logger.info(f"Fetching OzBargain RSS feed: {OZBARGAIN_RSS_URL}")
+        _cached_feed = feedparser.parse(OZBARGAIN_RSS_URL)
+        _cached_time = now
+    return _cached_feed
 
 
 def _parse_discount_from_title(title: str) -> Optional[float]:
@@ -112,11 +126,10 @@ class OzBargainFetcher(DealFetcher):
         Fetch and parse deals from OzBargain RSS feed.
         Returns a list of Deal objects.
         """
-        logger.info(f"Fetching OzBargain RSS feed: {OZBARGAIN_RSS_URL}")
         deals = []
 
         try:
-            feed = feedparser.parse(OZBARGAIN_RSS_URL)
+            feed = _get_ozbargain_feed()
             if feed.bozo and not feed.entries:
                 logger.error(f"Failed to parse OzBargain RSS: {feed.bozo_exception}")
                 return deals
@@ -215,11 +228,11 @@ class OzBargainFreebieFetcher(DealFetcher):
         if not OZBARGAIN_FREEBIES_ENABLED:
             return []
 
-        logger.info(f"Scanning OzBargain main feed for freebies: {OZBARGAIN_RSS_URL}")
+        logger.info(f"Scanning OzBargain main feed for freebies")
         freebies = []
 
         try:
-            feed = feedparser.parse(OZBARGAIN_RSS_URL)
+            feed = _get_ozbargain_feed()
             if feed.bozo and not feed.entries:
                 logger.error(f"Failed to parse OzBargain RSS: {feed.bozo_exception}")
                 return freebies
