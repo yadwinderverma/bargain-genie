@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from config import MAX_SLACK_ALERTS_PER_RUN, SLACK_CHANNEL_NAME, SLACK_NOTIFY_USER
+from config import MAX_SLACK_ALERTS_PER_RUN, SLACK_NOTIFY_USER
 from src.models import Deal
 
 logger = logging.getLogger(__name__)
