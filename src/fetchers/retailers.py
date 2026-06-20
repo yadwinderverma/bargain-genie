@@ -79,14 +79,28 @@ def _is_officeworks(source: str) -> bool:
     return "officeworks" in source.lower()
 
 
-def _matches_product(title: str, query: str) -> bool:
+def _matches_product(title: str, query_def) -> bool:
     """
-    All keywords in the query must appear in the title.
-    e.g. "shokz openfit 2" requires 'shokz', 'openfit', '2' all in title.
-    This prevents "Shokz OpenComm 2" or "OpenFit Air" from matching "shokz openfit 2".
+    All 'keywords' must appear in the title. None of the 'exclude' words must appear.
     """
     title_lower = title.lower()
-    return all(kw in title_lower for kw in query.lower().split())
+
+    if isinstance(query_def, str):
+        # Fallback for old string format
+        return all(kw in title_lower for kw in query_def.lower().split())
+    elif isinstance(query_def, dict):
+        keywords = [kw.lower() for kw in query_def.get("keywords", [])]
+        excludes = [ex.lower() for ex in query_def.get("exclude", [])]
+
+        if not keywords:
+            return False
+
+        has_all_keywords = all(bool(re.search(rf"\b{re.escape(kw)}\b", title_lower)) for kw in keywords)
+        has_any_exclude = any(bool(re.search(rf"\b{re.escape(ex)}\b", title_lower)) for ex in excludes)
+
+        return has_all_keywords and not has_any_exclude
+
+    return False
 
 
 def _fetch_shopping_results(query: str, api_key: str) -> list[dict]:
@@ -116,7 +130,7 @@ def _fetch_shopping_results(query: str, api_key: str) -> list[dict]:
         return []
 
 
-def _analyse_prices(query: str, results: list[dict]) -> list[dict]:
+def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
     """
     Filter to trusted retailers + exact product match, then find genuine discounts.
     Uses median of trusted-retailer prices as the market baseline — not the max,
@@ -144,7 +158,7 @@ def _analyse_prices(query: str, results: list[dict]) -> list[dict]:
             continue
 
         # Gate 2: must actually be the product we searched for
-        if not _matches_product(title, query):
+        if not _matches_product(title, query_def):
             logger.debug(f"  Skipping wrong product at {retailer_name}: '{title[:60]}'")
             skipped_product += 1
             continue
@@ -170,8 +184,9 @@ def _analyse_prices(query: str, results: list[dict]) -> list[dict]:
             "is_officeworks": _is_officeworks(source),
         })
 
+    query_str = query_def if isinstance(query_def, str) else " ".join(query_def.get("keywords", []))
     logger.info(
-        f"'{query}' — {len(results)} results: "
+        f"'{query_str}' — {len(results)} results: "
         f"{len(trusted)} trusted, {skipped_retailer} untrusted sellers skipped, "
         f"{skipped_product} wrong products skipped"
     )
@@ -182,6 +197,31 @@ def _analyse_prices(query: str, results: list[dict]) -> list[dict]:
     prices = sorted(p["current_price"] for p in trusted)
     market_low = prices[0]
     market_median = prices[len(prices) // 2]
+
+    # Statistical outlier filter: remove prices that are less than 30% of the median.
+    # This prevents an accessory (e.g. $20) from matching a main product (e.g. $500 lawn mower)
+    # and being seen as a huge discount.
+    valid_trusted = []
+    skipped_outlier = 0
+    for item in trusted:
+        if item["current_price"] < market_median * 0.3:
+            logger.debug(f"  Skipping weirdly low price (likely accessory): {item['title'][:60]} at ${item['current_price']:.0f} (median ${market_median:.0f})")
+            skipped_outlier += 1
+        else:
+            valid_trusted.append(item)
+
+    if skipped_outlier > 0:
+        logger.info(f"  Skipped {skipped_outlier} outliers that were < 30% of market median.")
+
+    trusted = valid_trusted
+    if not trusted:
+        return []
+
+    # Recalculate prices without outliers
+    prices = sorted(p["current_price"] for p in trusted)
+    market_low = prices[0]
+    market_median = prices[len(prices) // 2]
+
     # Use median as the "normal" price — much more stable than max which can be wildly inflated
     logger.info(
         f"  Trusted price range: low=${market_low:.0f}, "
@@ -286,10 +326,17 @@ class RetailerFetcher(DealFetcher):
         all_deals = []
         seen_urls: set[str] = set()
 
-        for product_query in SEARCH_QUERIES:
+        for query_def in SEARCH_QUERIES:
+            if isinstance(query_def, str):
+                product_query = query_def
+            elif isinstance(query_def, dict):
+                product_query = " ".join(query_def.get("keywords", []))
+            else:
+                continue
+
             logger.info(f"Shopping price check: '{product_query}'")
             results = _fetch_shopping_results(product_query, api_key)
-            deals = _analyse_prices(product_query, results)
+            deals = _analyse_prices(query_def, results)
 
             fresh = [d for d in deals if d.url not in seen_urls]
             seen_urls.update(d.url for d in fresh)

@@ -15,7 +15,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-from config import LLM_MAX_DEALS_PER_BATCH, LLM_MIN_SCORE, LLM_MODEL, OZBARGAIN_SCORE_BOOST, OZBARGAIN_TRUSTED
+from config import LLM_MAX_DEALS_PER_BATCH, LLM_MIN_SCORE, LLM_MODEL, OZBARGAIN_SCORE_BOOST, OZBARGAIN_TRUSTED, SEARCH_QUERIES
 from src.models import Deal
 
 logger = logging.getLogger(__name__)
@@ -78,25 +78,28 @@ class DealAnalyser:
 
         return (
             "You are an expert Australian bargain hunter. Rate each deal below.\n\n"
+            "The user ONLY wants to buy products matching these queries:\n"
+            f"{SEARCH_QUERIES}\n\n"
             "SIGNALS (in order of trust):\n"
             "1. FREEBIE — it's free, community upvoted it. Score 8+ unless it's clearly "
             "useless, region-locked, or requires a paid commitment to claim.\n"
             "2. OzBargain COMMUNITY VALIDATED — the Australian deal community posted and upvoted it. "
-            "That alone is a strong signal. Score baseline 7+. Only go lower if it's clearly a fake "
-            "discount or a product nobody would want.\n"
+            "That alone is a strong signal, BUT YOU MUST VERIFY it's actually the main product the user wants, "
+            "NOT an accessory. Score baseline 7+ ONLY if it genuinely matches the user's desired product.\n"
             "3. Officeworks PRICE BEAT — they guarantee to beat any AU competitor by 5%, so if "
             "they're the cheapest it's the best available price in Australia. Score on value.\n"
             "4. Amazon AU / other retailers — only included if 40%+ off market price. "
             "Verify the discount looks real (not an inflated original price trick). Score 7+ "
             "only if you'd genuinely tell a friend about it.\n\n"
-            "REJECT if:\n"
+            "REJECT (Score 1-4) if:\n"
+            "- The item is an accessory, cover, case, part, battery, charger, etc. when the user wants the main item.\n"
             "- Freebie requires a paid subscription to claim with no easy cancel\n"
             "- Original price looks inflated to manufacture a fake % off\n"
             "- It's a used/refurbished item not clearly disclosed\n"
             "- The 'deal' is just normal retail price\n\n"
             f"{deals_text}\n"
             "Score: 1–4 skip, 5–6 marginal, 7–8 good deal, 9–10 exceptional.\n"
-            "OzBargain community pick → baseline 7.\n"
+            "OzBargain community pick → baseline 7 (if it's the right product).\n"
             "Retailer 40%+ off → 7 if discount is genuine, higher if exceptional value."
         )
 

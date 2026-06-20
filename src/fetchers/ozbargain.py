@@ -82,14 +82,27 @@ def _parse_votes(entry) -> int:
 def _matches_search_queries(title: str, description: str) -> bool:
     """
     Check if a deal title/description matches any of the user's search queries.
-    Each query is split into keywords — all keywords must appear (case-insensitive).
-    e.g. "beats powerbeats pro 2" requires all four words to be present.
+    All 'keywords' must appear (case-insensitive) and none of 'exclude' must appear.
     """
     text = (title + " " + description).lower()
-    for query in SEARCH_QUERIES:
-        keywords = query.lower().split()
-        if all(kw in text for kw in keywords):
-            return True
+    for query_def in SEARCH_QUERIES:
+        if isinstance(query_def, str):
+            # Fallback for old string format
+            keywords = query_def.lower().split()
+            if all(kw in text for kw in keywords):
+                return True
+        elif isinstance(query_def, dict):
+            keywords = [kw.lower() for kw in query_def.get("keywords", [])]
+            excludes = [ex.lower() for ex in query_def.get("exclude", [])]
+
+            if not keywords:
+                continue
+
+            has_all_keywords = all(bool(re.search(rf"\b{re.escape(kw)}\b", text)) for kw in keywords)
+            has_any_exclude = any(bool(re.search(rf"\b{re.escape(ex)}\b", text)) for ex in excludes)
+
+            if has_all_keywords and not has_any_exclude:
+                return True
     return False
 
 
