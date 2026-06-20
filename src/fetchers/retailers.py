@@ -10,6 +10,7 @@ Strategy:
 6. Officeworks: flag if they're cheapest (price-beat signal)
 """
 
+import hashlib
 import logging
 import os
 import re
@@ -281,7 +282,7 @@ def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
         display_discount = own_discount if own_discount else (vs_median if vs_median > 0 else None)
 
         deals.append(Deal(
-            id=f"retail_{abs(hash(item['link']))}",
+            id=f"retail_{hashlib.md5(item['link'].encode('utf-8')).hexdigest()}",
             source=item["retailer"].lower().replace(" ", "_"),
             title=item["title"],
             url=item["link"],
