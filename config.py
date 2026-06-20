@@ -7,10 +7,30 @@ Adjust these settings to customise what deals you're looking for.
 # These are the specific products you want to monitor.
 # Be specific enough to avoid false matches (e.g. include model number/version).
 SEARCH_QUERIES = [
-    "beats powerbeats pro 2",
-    "shokz openfit 2",
-    "bose ultra open earbuds",
-    "airpods pro",
+    {
+        "keywords": ["beats", "powerbeats", "pro", "2"],
+        "exclude": ["case", "cover", "tip", "cable"]
+    },
+    {
+        "keywords": ["shokz", "openfit", "2"],
+        "exclude": ["case", "cover"]
+    },
+    {
+        "keywords": ["bose", "ultra", "open", "earbuds"],
+        "exclude": ["case", "cover"]
+    },
+    {
+        "keywords": ["airpods", "pro"],
+        "exclude": ["case", "cover", "tip"]
+    },
+    {
+        "keywords": ["lawn", "mower"],
+        "exclude": ["blade", "cover", "part", "catch", "oil", "spark plug", "filter"]
+    },
+    {
+        "keywords": ["lawn", "mower", "blower", "trimmer"],
+        "exclude": ["blade", "cover", "part", "catch", "oil", "spark plug", "filter"]
+    }
 ]
 
 # --- Deal Thresholds ---
