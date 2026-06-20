@@ -198,11 +198,18 @@ def _is_freebie(title: str, description: str, tags: list) -> bool:
 
     # Check title for free signals
     text = (title + " " + description).lower()
-    return bool(re.search(
-        r"\bfree\b|\bfreebie\b|\$0\b|free\s+trial|free\s+sub|no\s+cost",
-        text,
-        re.IGNORECASE,
-    ))
+
+    # Check for strong freebie signals first
+    if re.search(r"\bfreebie\b|\$0\b|free\s+trial|free\s+sub|no\s+cost|\b100%\s+free\b", text, re.IGNORECASE):
+        return True
+
+    # If it just contains "free", ensure it's not a common false positive
+    if re.search(r"\bfree\b", text, re.IGNORECASE):
+        false_positives = r"\b(buy\s*1\s*get\s*1|buy\s*one\s*get\s*one|sugar|gluten|care|risk|duty|toll|interest|hands)\s*free\b|\bfree\s*(shipping|delivery|postage|gift)\b"
+        if not re.search(false_positives, text, re.IGNORECASE):
+            return True
+
+    return False
 
 
 class OzBargainFreebieFetcher(DealFetcher):
