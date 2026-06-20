@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import feedparser
-import requests
 
 from config import (
     MIN_DISCOUNT_PERCENT, MIN_OZBARGAIN_VOTES, OZBARGAIN_MAX_ITEMS,
