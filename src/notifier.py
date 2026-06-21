@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from config import MAX_SLACK_ALERTS_PER_RUN, SLACK_CHANNEL_NAME, SLACK_NOTIFY_USER
+from config import MAX_SLACK_ALERTS_PER_RUN, SLACK_NOTIFY_USER
 from src.models import Deal
 
 logger = logging.getLogger(__name__)
@@ -62,10 +62,12 @@ class SlackNotifier:
                 return emoji
         return "💡"
 
+
     def _format_price(self, price: float | None) -> str:
         if price is None:
             return "N/A"
         return f"${price:,.2f}"
+
 
     def _build_deal_block(self, deal: Deal) -> list[dict]:
         """Build Slack Block Kit blocks for a single deal."""
@@ -98,7 +100,8 @@ class SlackNotifier:
         if deal.llm_category:
             context_parts.append(f"📦 {deal.llm_category}")
 
-        title_text = f"<{deal.url}|{deal.title}>" if deal.url else deal.title
+        safe_title = deal.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        title_text = f"<{deal.url}|{safe_title}>" if deal.url else safe_title
 
         blocks = [
             {
@@ -205,7 +208,8 @@ class SlackNotifier:
                 response.raise_for_status()
                 logger.info(f"Slack message {chunk_idx + 1}/{len(block_chunks)} sent successfully")
             except requests.RequestException as e:
-                logger.error(f"Failed to send Slack message chunk {chunk_idx + 1}: {e}")
+                error_msg = str(e).replace(self.webhook_url, "***REDACTED***") if self.webhook_url else str(e)
+                logger.error(f"Failed to send Slack message chunk {chunk_idx + 1}: {error_msg}")
                 success = False
 
         return success
@@ -233,7 +237,8 @@ class SlackNotifier:
         try:
             requests.post(self.webhook_url, json=payload, timeout=15)
         except requests.RequestException as e:
-            logger.error(f"Failed to send error message to Slack: {e}")
+            error_msg = str(e).replace(self.webhook_url, "***REDACTED***") if self.webhook_url else str(e)
+            logger.error(f"Failed to send error message to Slack: {error_msg}")
 
 # Legacy functions
 def send_slack_alerts(deals: list[dict]) -> bool:
