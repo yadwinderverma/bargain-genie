@@ -59,3 +59,29 @@ def test_matches_product_dict_query_regex_escape():
     query = {"keywords": ["5.1"], "exclude": ["1.0"]}
     assert _matches_product("Speaker 5.1 System", query) is True
     assert _matches_product("Speaker 5.1 System 1.0", query) is False
+from src.fetchers.retailers import _is_officeworks
+
+def test_is_officeworks_exact_match():
+    assert _is_officeworks("officeworks") is True
+
+def test_is_officeworks_domain():
+    assert _is_officeworks("officeworks.com.au") is True
+
+def test_is_officeworks_case_insensitivity():
+    assert _is_officeworks("Officeworks") is True
+    assert _is_officeworks("OFFICEWORKS") is True
+    assert _is_officeworks("OfFiCeWoRkS") is True
+
+def test_is_officeworks_substring():
+    assert _is_officeworks("https://www.officeworks.com.au/product/123") is True
+    assert _is_officeworks("some text officeworks some more text") is True
+
+def test_is_officeworks_negative_cases():
+    assert _is_officeworks("amazon.com.au") is False
+    assert _is_officeworks("jbhifi.com.au") is False
+    assert _is_officeworks("harvey norman") is False
+    assert _is_officeworks("") is False
+
+def test_is_officeworks_with_spaces():
+    assert _is_officeworks(" office works ") is False
+    assert _is_officeworks(" officeworks ") is True

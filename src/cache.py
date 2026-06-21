@@ -18,21 +18,29 @@ class DealCache:
     def __init__(self, cache_file: str = CACHE_FILE, max_age_days: int = CACHE_MAX_AGE_DAYS):
         self.cache_file = cache_file
         self.max_age_days = max_age_days
+        self._cache_data = None
 
     def _load_cache(self) -> dict:
         """Load the cache from disk. Returns empty dict if not found."""
+        if self._cache_data is not None:
+            return self._cache_data
+
         if not os.path.exists(self.cache_file):
             logger.info(f"Cache file not found at {self.cache_file}, starting fresh")
-            return {}
+            self._cache_data = {}
+            return self._cache_data
         try:
             with open(self.cache_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                self._cache_data = json.load(f)
+                return self._cache_data
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"Could not read cache file: {e}. Starting fresh.")
-            return {}
+            self._cache_data = {}
+            return self._cache_data
 
     def _save_cache(self, cache: dict) -> None:
         """Save the cache to disk."""
+        self._cache_data = cache
         os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
         try:
             with open(self.cache_file, "w", encoding="utf-8") as f:

@@ -79,24 +79,38 @@ def _is_officeworks(source: str) -> bool:
     return "officeworks" in source.lower()
 
 
-def _matches_product(title: str, query_def) -> bool:
-    """
-    All 'keywords' must appear in the title. None of the 'exclude' words must appear.
-    """
-    title_lower = title.lower()
-
+def _compile_query(query_def):
+    """Pre-compiles the query strings and regexes to save time during loops."""
     if isinstance(query_def, str):
-        # Fallback for old string format
-        return all(kw in title_lower for kw in query_def.lower().split())
+        return {"type": "str", "words": query_def.lower().split()}
     elif isinstance(query_def, dict):
         keywords = [kw.lower() for kw in query_def.get("keywords", [])]
         excludes = [ex.lower() for ex in query_def.get("exclude", [])]
 
-        if not keywords:
+        kw_regexes = [re.compile(rf"\b{re.escape(kw)}\b") for kw in keywords]
+        ex_regexes = [re.compile(rf"\b{re.escape(ex)}\b") for ex in excludes]
+
+        return {"type": "dict", "keywords": kw_regexes, "excludes": ex_regexes}
+    return None
+
+
+def _matches_product(title: str, parsed_query) -> bool:
+    """
+    All 'keywords' must appear in the title. None of the 'exclude' words must appear.
+    """
+    if not parsed_query:
+        return False
+
+    title_lower = title.lower()
+
+    if parsed_query["type"] == "str":
+        return all(kw in title_lower for kw in parsed_query["words"])
+    elif parsed_query["type"] == "dict":
+        if not parsed_query["keywords"]:
             return False
 
-        has_all_keywords = all(bool(re.search(rf"\b{re.escape(kw)}\b", title_lower)) for kw in keywords)
-        has_any_exclude = any(bool(re.search(rf"\b{re.escape(ex)}\b", title_lower)) for ex in excludes)
+        has_all_keywords = all(bool(kw_re.search(title_lower)) for kw_re in parsed_query["keywords"])
+        has_any_exclude = any(bool(ex_re.search(title_lower)) for ex_re in parsed_query["excludes"])
 
         return has_all_keywords and not has_any_exclude
 
@@ -143,6 +157,8 @@ def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
     skipped_retailer = 0
     skipped_product = 0
 
+    parsed_query = _compile_query(query_def)
+
     for item in results:
         source = item.get("source", "")
         title = item.get("title", "")
@@ -158,7 +174,7 @@ def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
             continue
 
         # Gate 2: must actually be the product we searched for
-        if not _matches_product(title, query_def):
+        if not _matches_product(title, parsed_query):
             logger.debug(f"  Skipping wrong product at {retailer_name}: '{title[:60]}'")
             skipped_product += 1
             continue
