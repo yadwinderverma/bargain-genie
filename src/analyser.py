@@ -53,7 +53,31 @@ class DealAnalyser:
             return None
         return genai.Client(api_key=api_key)
 
-    def _get_system_instruction(self) -> str:
+    def _build_prompt(self, deals: list[Deal]) -> str:
+        deals_parts = []
+        for i, deal in enumerate(deals, 1):
+            community_note = ""
+            if deal.is_freebie:
+                duration_str = f" ({deal.duration_note})" if deal.duration_note else ""
+                community_note = f" [FREEBIE{duration_str} — {deal.votes} OzBargain upvotes]"
+            elif deal.source == "ozbargain" and deal.community_validated:
+                community_note = f" [COMMUNITY VALIDATED — {deal.votes} OzBargain upvotes]"
+            elif deal.price_beat_retailer:
+                community_note = " [OFFICEWORKS — 5% Price Beat Guarantee, likely lowest AU price]"
+
+            deals_parts.append(
+                f"\nDeal {i}:{community_note}\n"
+                f"  Title:          {deal.title}\n"
+                f"  Source:         {deal.source}\n"
+                f"  Original Price: ${deal.original_price or 'Unknown'}\n"
+                f"  Sale Price:     ${deal.sale_price or 'Unknown'}\n"
+                f"  Discount:       {deal.discount_pct or 'Unknown'}%\n"
+                f"  OzBargain Votes:{deal.votes}\n"
+                f"  Description:    {deal.description[:200]}\n"
+            )
+
+        deals_text = "".join(deals_parts)
+
         return (
             "You are an expert Australian bargain hunter. Rate each deal below.\n\n"
             "The user ONLY wants to buy products matching these queries:\n"
