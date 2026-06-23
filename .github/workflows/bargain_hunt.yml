@@ -44,7 +44,12 @@ jobs:
         run: |
           git config --local user.email "bargain-hunter[bot]@users.noreply.github.com"
           git config --local user.name "Bargain Hunter Bot"
-          git add data/deals_cache.json
-          # Only commit if there are changes
-          git diff --staged --quiet || git commit -m "chore: update deals cache [skip ci]"
-          git push
+          if [ -f data/deals_cache.json ]; then
+            git add data/deals_cache.json
+            # Only commit if there are changes
+            git diff --staged --quiet || git commit -m "chore: update deals cache [skip ci]"
+            git push
+          else
+            echo "No cache file found at data/deals_cache.json to commit."
+          fi
+
