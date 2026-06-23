@@ -10,6 +10,7 @@ Strategy:
 6. Officeworks: flag if they're cheapest (price-beat signal)
 """
 
+import hashlib
 import logging
 import os
 import re
@@ -98,6 +99,13 @@ def _matches_product(title: str, parsed_query) -> bool:
     """
     All 'keywords' must appear in the title. None of the 'exclude' words must appear.
     """
+    if parsed_query is None:
+        return False
+
+    # Backward compatibility: if not compiled yet, compile it on the fly
+    if isinstance(parsed_query, str) or (isinstance(parsed_query, dict) and "type" not in parsed_query):
+        parsed_query = _compile_query(parsed_query)
+
     if not parsed_query:
         return False
 
@@ -297,7 +305,7 @@ def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
         display_discount = own_discount if own_discount else (vs_median if vs_median > 0 else None)
 
         deals.append(Deal(
-            id=f"retail_{abs(hash(item['link']))}",
+            id=f"retail_{hashlib.md5(item['link'].encode('utf-8')).hexdigest()}",
             source=item["retailer"].lower().replace(" ", "_"),
             title=item["title"],
             url=item["link"],

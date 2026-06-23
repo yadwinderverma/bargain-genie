@@ -35,6 +35,27 @@ LIFETIME_DURATION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Pre-compile search queries for performance
+_COMPILED_SEARCH_QUERIES = []
+for query_def in SEARCH_QUERIES:
+    if isinstance(query_def, str):
+        _COMPILED_SEARCH_QUERIES.append({
+            "type": "str",
+            "keywords": query_def.lower().split()
+        })
+    elif isinstance(query_def, dict):
+        kw_list = [kw.lower() for kw in query_def.get("keywords", [])]
+        ex_list = [ex.lower() for ex in query_def.get("exclude", [])]
+        if not kw_list:
+            continue
+
+        _COMPILED_SEARCH_QUERIES.append({
+            "type": "dict",
+            "keywords": [re.compile(rf"\b{re.escape(kw)}\b") for kw in kw_list],
+            "excludes": [re.compile(rf"\b{re.escape(ex)}\b") for ex in ex_list]
+        })
+
+
 
 _cached_feed = None
 _cached_time = 0
@@ -112,23 +133,16 @@ def _matches_search_queries(title: str, description: str) -> bool:
     All 'keywords' must appear (case-insensitive) and none of 'exclude' must appear.
     """
     text = (title + " " + description).lower()
-    for query_def in SEARCH_QUERIES:
-        if isinstance(query_def, str):
-            # Fallback for old string format
-            keywords = query_def.lower().split()
-            if all(kw in text for kw in keywords):
+    for query in _COMPILED_SEARCH_QUERIES:
+        if query["type"] == "str":
+            if all(kw in text for kw in query["keywords"]):
                 return True
-        elif isinstance(query_def, dict):
-            keywords = [kw.lower() for kw in query_def.get("keywords", [])]
-            excludes = [ex.lower() for ex in query_def.get("exclude", [])]
-
-            if not keywords:
+        elif query["type"] == "dict":
+            has_all_keywords = all(bool(kw_re.search(text)) for kw_re in query["keywords"])
+            if not has_all_keywords:
                 continue
-
-            has_all_keywords = all(bool(re.search(rf"\b{re.escape(kw)}\b", text)) for kw in keywords)
-            has_any_exclude = any(bool(re.search(rf"\b{re.escape(ex)}\b", text)) for ex in excludes)
-
-            if has_all_keywords and not has_any_exclude:
+            has_any_exclude = any(bool(ex_re.search(text)) for ex_re in query["excludes"])
+            if not has_any_exclude:
                 return True
     return False
 
