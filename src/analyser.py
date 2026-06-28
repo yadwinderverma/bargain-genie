@@ -15,7 +15,14 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-from config import LLM_MAX_DEALS_PER_BATCH, LLM_MIN_SCORE, LLM_MODEL, OZBARGAIN_SCORE_BOOST, OZBARGAIN_TRUSTED, SEARCH_QUERIES
+from config import (
+    LLM_MAX_DEALS_PER_BATCH,
+    LLM_MIN_SCORE,
+    LLM_MODEL,
+    OZBARGAIN_SCORE_BOOST,
+    OZBARGAIN_TRUSTED,
+    SEARCH_QUERIES,
+)
 from src.models import Deal
 
 logger = logging.getLogger(__name__)
@@ -27,12 +34,13 @@ RATE_LIMIT_DELAY = 4  # Seconds between batches — free tier is 15 req/min
 # Structured output schema — Gemini will return exactly this shape
 # ---------------------------------------------------------------------------
 
+
 class DealScore(BaseModel):
     deal_index: int
-    score: int                  # 1–10
+    score: int  # 1–10
     genuine_discount: bool
-    reason: str                 # Max ~20 words
-    category: str               # e.g. "Electronics", "Appliances"
+    reason: str  # Max ~20 words
+    category: str  # e.g. "Electronics", "Appliances"
 
 
 class DealAnalysis(BaseModel):
@@ -59,11 +67,17 @@ class DealAnalyser:
             community_note = ""
             if deal.is_freebie:
                 duration_str = f" ({deal.duration_note})" if deal.duration_note else ""
-                community_note = f" [FREEBIE{duration_str} — {deal.votes} OzBargain upvotes]"
+                community_note = (
+                    f" [FREEBIE{duration_str} — {deal.votes} OzBargain upvotes]"
+                )
             elif deal.source == "ozbargain" and deal.community_validated:
-                community_note = f" [COMMUNITY VALIDATED — {deal.votes} OzBargain upvotes]"
+                community_note = (
+                    f" [COMMUNITY VALIDATED — {deal.votes} OzBargain upvotes]"
+                )
             elif deal.price_beat_retailer:
-                community_note = " [OFFICEWORKS — 5% Price Beat Guarantee, likely lowest AU price]"
+                community_note = (
+                    " [OFFICEWORKS — 5% Price Beat Guarantee, likely lowest AU price]"
+                )
 
             deals_parts.append(
                 f"\nDeal {i}:{community_note}\n"
@@ -114,11 +128,17 @@ class DealAnalyser:
             community_note = ""
             if deal.is_freebie:
                 duration_str = f" ({deal.duration_note})" if deal.duration_note else ""
-                community_note = f" [FREEBIE{duration_str} — {deal.votes} OzBargain upvotes]"
+                community_note = (
+                    f" [FREEBIE{duration_str} — {deal.votes} OzBargain upvotes]"
+                )
             elif deal.source == "ozbargain" and deal.community_validated:
-                community_note = f" [COMMUNITY VALIDATED — {deal.votes} OzBargain upvotes]"
+                community_note = (
+                    f" [COMMUNITY VALIDATED — {deal.votes} OzBargain upvotes]"
+                )
             elif deal.price_beat_retailer:
-                community_note = " [OFFICEWORKS — 5% Price Beat Guarantee, likely lowest AU price]"
+                community_note = (
+                    " [OFFICEWORKS — 5% Price Beat Guarantee, likely lowest AU price]"
+                )
 
             deals_text += (
                 f"\nDeal {i}:{community_note}\n"
@@ -193,7 +213,9 @@ class DealAnalyser:
         for i in range(0, len(deals), LLM_MAX_DEALS_PER_BATCH):
             batch = deals[i : i + LLM_MAX_DEALS_PER_BATCH]
             batch_num = i // LLM_MAX_DEALS_PER_BATCH + 1
-            logger.info(f"LLM batch {batch_num}/{-(-len(deals) // LLM_MAX_DEALS_PER_BATCH)}: {len(batch)} deals")
+            logger.info(
+                f"LLM batch {batch_num}/{-(-len(deals) // LLM_MAX_DEALS_PER_BATCH)}: {len(batch)} deals"
+            )
 
             prompt = self._build_prompt(batch)
 
@@ -217,12 +239,12 @@ class DealAnalyser:
 
             except Exception as e:
                 logger.error(f"Gemini call failed for batch {batch_num}: {e}")
-                # On failure, pass deals through at threshold so they aren't silently dropped
+                # On failure, fail secure: drop deals by setting score to 0
                 for deal in batch:
-                    deal.llm_score = LLM_MIN_SCORE
-                    deal.llm_reason = f"LLM error — unfiltered ({type(e).__name__})"
+                    deal.llm_score = 0
+                    deal.llm_reason = f"LLM error — dropped ({type(e).__name__})"
                     deal.llm_category = "General"
-                    deal.llm_genuine = True
+                    deal.llm_genuine = False
 
             scored_deals.extend(batch)
 
@@ -235,6 +257,7 @@ class DealAnalyser:
             f"LLM filter: {len(scored_deals)} analysed → {len(passing)} passed (score >= {LLM_MIN_SCORE})"
         )
         return passing
+
 
 def analyse_deals(deals: list[Deal]) -> list[Deal]:
     """Legacy wrapper for backward compatibility."""
