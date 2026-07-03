@@ -53,31 +53,7 @@ class DealAnalyser:
             return None
         return genai.Client(api_key=api_key)
 
-    def _build_prompt(self, deals: list[Deal]) -> str:
-        deals_parts = []
-        for i, deal in enumerate(deals, 1):
-            community_note = ""
-            if deal.is_freebie:
-                duration_str = f" ({deal.duration_note})" if deal.duration_note else ""
-                community_note = f" [FREEBIE{duration_str} — {deal.votes} OzBargain upvotes]"
-            elif deal.source == "ozbargain" and deal.community_validated:
-                community_note = f" [COMMUNITY VALIDATED — {deal.votes} OzBargain upvotes]"
-            elif deal.price_beat_retailer:
-                community_note = " [OFFICEWORKS — 5% Price Beat Guarantee, likely lowest AU price]"
-
-            deals_parts.append(
-                f"\nDeal {i}:{community_note}\n"
-                f"  Title:          {deal.title}\n"
-                f"  Source:         {deal.source}\n"
-                f"  Original Price: ${deal.original_price or 'Unknown'}\n"
-                f"  Sale Price:     ${deal.sale_price or 'Unknown'}\n"
-                f"  Discount:       {deal.discount_pct or 'Unknown'}%\n"
-                f"  OzBargain Votes:{deal.votes}\n"
-                f"  Description:    {deal.description[:200]}\n"
-            )
-
-        deals_text = "".join(deals_parts)
-
+    def _get_system_instruction(self) -> str:
         return (
             "You are an expert Australian bargain hunter. Rate each deal below.\n\n"
             "The user ONLY wants to buy products matching these queries:\n"
@@ -208,6 +184,12 @@ class DealAnalyser:
                         system_instruction=self._get_system_instruction(),
                     ),
                 )
+                if not response or not response.parsed:
+                    block_reason = ""
+                    if response and response.candidates and response.candidates[0].finish_reason:
+                        block_reason = f" (Safety Block: {response.candidates[0].finish_reason})"
+                    raise ValueError(f"Empty or blocked Gemini response{block_reason}")
+
                 analysis: DealAnalysis = response.parsed
                 batch = self._attach_scores(batch, analysis.results)
                 logger.info(
@@ -217,12 +199,12 @@ class DealAnalyser:
 
             except Exception as e:
                 logger.error(f"Gemini call failed for batch {batch_num}: {e}")
-                # On failure, pass deals through at threshold so they aren't silently dropped
+                # On failure, fail closed (set score to 1) so it doesn't post to Slack
                 for deal in batch:
-                    deal.llm_score = LLM_MIN_SCORE
-                    deal.llm_reason = f"LLM error — unfiltered ({type(e).__name__})"
+                    deal.llm_score = 1
+                    deal.llm_reason = f"LLM error — filtered ({type(e).__name__})"
                     deal.llm_category = "General"
-                    deal.llm_genuine = True
+                    deal.llm_genuine = False
 
             scored_deals.extend(batch)
 

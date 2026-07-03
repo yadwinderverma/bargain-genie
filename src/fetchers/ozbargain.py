@@ -15,11 +15,15 @@ from config import (
     MIN_DISCOUNT_PERCENT, MIN_OZBARGAIN_VOTES, OZBARGAIN_MAX_ITEMS,
     OZBARGAIN_RSS_URL, OZBARGAIN_TRUSTED, OZBARGAIN_MIN_VOTES_TRUSTED,
     SEARCH_QUERIES, OZBARGAIN_FREEBIES_ENABLED, OZBARGAIN_FREEBIES_MIN_VOTES,
+    GLOBAL_EXCLUDES,
 )
 from src.models import Deal
 from src.fetchers.base import DealFetcher
 
 logger = logging.getLogger(__name__)
+
+# Pre-compile global excludes from config
+_COMPILED_GLOBAL_EXCLUDES = [re.compile(rf"\b{re.escape(ex.lower())}\b") for ex in GLOBAL_EXCLUDES]
 
 # Pre-compile regex patterns to avoid repeated compilation overhead in loops
 FREEBIE_PATTERN = re.compile(
@@ -133,6 +137,13 @@ def _matches_search_queries(title: str, description: str) -> bool:
     All 'keywords' must appear (case-insensitive) and none of 'exclude' must appear.
     """
     text = (title + " " + description).lower()
+    
+    # Check global excludes first
+    has_any_global_exclude = any(bool(ex_re.search(text)) for ex_re in _COMPILED_GLOBAL_EXCLUDES)
+    if has_any_global_exclude:
+        logger.debug(f"OzBargain deal '{title}' matched global exclude pattern")
+        return False
+
     for query in _COMPILED_SEARCH_QUERIES:
         if query["type"] == "str":
             if all(kw in text for kw in query["keywords"]):

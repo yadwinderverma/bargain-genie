@@ -166,3 +166,23 @@ def test_match_trusted_retailer_untrusted():
 def test_match_trusted_retailer_edge_cases():
     assert _match_trusted_retailer("") is None
     assert _match_trusted_retailer(" ") is None
+
+
+def test_match_trusted_retailer_marketplace():
+    # Marketplace indicators should be blocked
+    assert _match_trusted_retailer("Kogan.com - Seller X") is None
+    assert _match_trusted_retailer("Seller Y via Kogan.com") is None
+    assert _match_trusted_retailer("Amazon.com.au - Merchant Z") is None
+    assert _match_trusted_retailer("Amazon.com.au") == "Amazon AU"
+    assert _match_trusted_retailer("Kogan.com") == "Kogan"
+
+
+def test_matches_product_global_excludes():
+    query = {"keywords": ["airpods", "pro"], "exclude": ["case"]}
+    # Exclude refurbished/used/replica/replacement globally
+    assert _matches_product("Apple AirPods Pro (Refurbished)", query) is False
+    assert _matches_product("Renewed Apple AirPods Pro", query) is False
+    assert _matches_product("Apple AirPods Pro Left Earbud Replacement", query) is False
+    assert _matches_product("AirPods Pro Left Only", query) is False
+    assert _matches_product("Replica AirPods Pro", query) is False
+    assert _matches_product("Apple AirPods Pro", query) is True

@@ -33,6 +33,19 @@ SEARCH_QUERIES = [
     }
 ]
 
+# --- Global Excludes ---
+# These keywords will be excluded globally from all search query matching
+# to prevent refurbished, used, replica, or single replacement parts alerts.
+GLOBAL_EXCLUDES = [
+    "refurbished", "refurb", "renewed", "used", "pre-owned", "grade a", "grade b", 
+    "ex-demo", "second hand", "replica", "copy", "clone", "compatible", "fake", 
+    "non-genuine", "replacement", "left earbud", "right earbud", "single", "earbud only", 
+    "charging case only", "replacement case", "left only", "right only"
+]
+
+# Verify price by crawling the direct retailer landing page before alerting
+VERIFY_PRICES_LIVE = True
+
 # --- Deal Thresholds ---
 # OzBargain: community votes are the signal — no discount % required
 MIN_OZBARGAIN_VOTES = 10        # Minimum upvotes to surface an OzBargain deal

@@ -20,13 +20,16 @@ from typing import Optional
 
 import requests
 
-from config import MIN_DISCOUNT_PERCENT, SEARCH_QUERIES, SERPER_ENABLED
+from config import MIN_DISCOUNT_PERCENT, SEARCH_QUERIES, SERPER_ENABLED, GLOBAL_EXCLUDES
 from src.models import Deal
 from src.fetchers.base import DealFetcher
 
 logger = logging.getLogger(__name__)
 
 SERPER_SHOPPING_URL = "https://google.serper.dev/shopping"
+
+# Pre-compile global excludes from config
+_COMPILED_GLOBAL_EXCLUDES = [re.compile(rf"\b{re.escape(ex.lower())}\b") for ex in GLOBAL_EXCLUDES]
 
 # ONLY these retailers are trusted. Anything else (Cash Converters, random
 # marketplaces, overseas sellers, etc.) is filtered out entirely.
@@ -68,10 +71,19 @@ def _match_trusted_retailer(source: str) -> Optional[str]:
     """
     Return the clean retailer name if source matches a trusted retailer, else None.
     This is the gatekeeper — anything not in TRUSTED_RETAILERS is dropped.
+    Also blocks third-party marketplace listings from trusted platforms.
     """
-    source_lower = source.lower()
+    source_lower = source.lower().strip()
+    
+    # Marketplace indicator detection
+    marketplace_indicators = [" - ", " via ", " on ", " by ", "seller", "marketplace", "merchant"]
+    
     for domain, name in TRUSTED_RETAILERS.items():
         if domain in source_lower:
+            # If it matches a domain but contains a marketplace indicator, reject it
+            if any(indicator in source_lower for indicator in marketplace_indicators):
+                logger.debug(f"Rejecting marketplace listing for trusted retailer: '{source}'")
+                continue
             return name
     return None
 
@@ -110,6 +122,12 @@ def _matches_product(title: str, parsed_query) -> bool:
         return False
 
     title_lower = title.lower()
+
+    # Check global excludes first
+    has_any_global_exclude = any(bool(ex_re.search(title_lower)) for ex_re in _COMPILED_GLOBAL_EXCLUDES)
+    if has_any_global_exclude:
+        logger.debug(f"Title '{title}' matched global exclude pattern")
+        return False
 
     if parsed_query["type"] == "str":
         return all(kw in title_lower for kw in parsed_query["words"])
