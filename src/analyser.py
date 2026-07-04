@@ -43,14 +43,13 @@ class DealAnalyser:
     def __init__(self):
         self.client = self._get_client()
 
-    def _get_client(self) -> Optional[genai.Client]:
+    def _get_client(self) -> genai.Client:
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            logger.warning(
-                "GEMINI_API_KEY not set — skipping LLM analysis, passing all deals through. "
+            raise ValueError(
+                "GEMINI_API_KEY environment variable is not set. "
                 "Get a free key at https://aistudio.google.com/app/apikey"
             )
-            return None
         return genai.Client(api_key=api_key)
 
     def _get_system_instruction(self) -> str:
@@ -84,12 +83,17 @@ class DealAnalyser:
             "Retailer 40%+ off → 7 if discount is genuine, higher if exceptional value."
         )
 
+    def _sanitize_text(self, text: str) -> str:
+        if not text:
+            return ""
+        return text.replace("<", "&lt;").replace(">", "&gt;")
+
     def _build_prompt(self, deals: list[Deal]) -> str:
         deals_text = ""
         for i, deal in enumerate(deals, 1):
             community_note = ""
             if deal.is_freebie:
-                duration_str = f" ({deal.duration_note})" if deal.duration_note else ""
+                duration_str = f" ({self._sanitize_text(deal.duration_note)})" if deal.duration_note else ""
                 community_note = f" [FREEBIE{duration_str} — {deal.votes} OzBargain upvotes]"
             elif deal.source == "ozbargain" and deal.community_validated:
                 community_note = f" [COMMUNITY VALIDATED — {deal.votes} OzBargain upvotes]"
@@ -98,13 +102,13 @@ class DealAnalyser:
 
             deals_text += (
                 f"\nDeal {i}:{community_note}\n"
-                f"  Title:          {deal.title}\n"
+                f"  Title:          {self._sanitize_text(deal.title)}\n"
                 f"  Source:         {deal.source}\n"
                 f"  Original Price: ${deal.original_price or 'Unknown'}\n"
                 f"  Sale Price:     ${deal.sale_price or 'Unknown'}\n"
                 f"  Discount:       {deal.discount_pct or 'Unknown'}%\n"
                 f"  OzBargain Votes:{deal.votes}\n"
-                f"  Description:    {deal.description[:200]}\n"
+                f"  Description:    {self._sanitize_text(deal.description[:200])}\n"
             )
 
         return f"<deals>\n{deals_text}\n</deals>"
@@ -115,11 +119,11 @@ class DealAnalyser:
         for i, deal in enumerate(deals, 1):
             result = score_map.get(i)
             if result is None:
-                logger.warning(f"No score returned for deal {i}: {deal.title[:50]}")
-                deal.llm_score = LLM_MIN_SCORE
-                deal.llm_reason = "No LLM score returned"
+                logger.warning(f"No score returned for deal {i}: {deal.title[:50]} — failing closed.")
+                deal.llm_score = 1  # Fail closed (reject deal)
+                deal.llm_reason = "Error: No LLM score returned"
                 deal.llm_category = "General"
-                deal.llm_genuine = True
+                deal.llm_genuine = False
                 continue
 
             base_score = max(1, min(10, result.score))  # Clamp to 1–10
@@ -173,38 +177,51 @@ class DealAnalyser:
 
             prompt = self._build_prompt(batch)
 
-            try:
-                response = self.client.models.generate_content(
-                    model=LLM_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=DealAnalysis,
-                        temperature=0.1,
-                        system_instruction=self._get_system_instruction(),
-                    ),
-                )
-                if not response or not response.parsed:
-                    block_reason = ""
-                    if response and response.candidates and response.candidates[0].finish_reason:
-                        block_reason = f" (Safety Block: {response.candidates[0].finish_reason})"
-                    raise ValueError(f"Empty or blocked Gemini response{block_reason}")
+            max_attempts = 3
+            success = False
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    response = self.client.models.generate_content(
+                        model=LLM_MODEL,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=DealAnalysis,
+                            temperature=0.1,
+                            system_instruction=self._get_system_instruction(),
+                        ),
+                    )
+                    if not response or not response.parsed:
+                        block_reason = ""
+                        if response and response.candidates and response.candidates[0].finish_reason:
+                            block_reason = f" (Safety Block: {response.candidates[0].finish_reason})"
+                        raise ValueError(f"Empty or blocked Gemini response{block_reason}")
 
-                analysis: DealAnalysis = response.parsed
-                batch = self._attach_scores(batch, analysis.results)
-                logger.info(
-                    f"Batch {batch_num} scores: "
-                    + ", ".join(f"{d.llm_score}" for d in batch)
-                )
+                    analysis: DealAnalysis = response.parsed
+                    batch = self._attach_scores(batch, analysis.results)
+                    logger.info(
+                        f"Batch {batch_num} scores: "
+                        + ", ".join(f"{d.llm_score}" for d in batch)
+                    )
+                    success = True
+                    break
 
-            except Exception as e:
-                logger.error(f"Gemini call failed for batch {batch_num}: {e}")
-                # On failure, fail closed (set score to 1) so it doesn't post to Slack
-                for deal in batch:
-                    deal.llm_score = 1
-                    deal.llm_reason = f"LLM error — filtered ({type(e).__name__})"
-                    deal.llm_category = "General"
-                    deal.llm_genuine = False
+                except Exception as e:
+                    logger.warning(
+                        f"Gemini call attempt {attempt}/{max_attempts} failed for batch {batch_num}: {e}"
+                    )
+                    if attempt < max_attempts:
+                        sleep_time = 2 ** attempt
+                        logger.info(f"Retrying in {sleep_time} seconds...")
+                        time.sleep(sleep_time)
+                    else:
+                        logger.error(f"Gemini call permanently failed for batch {batch_num} after {max_attempts} attempts.")
+                        # On failure, fail closed (set score to 1) so it doesn't post to Slack
+                        for deal in batch:
+                            deal.llm_score = 1
+                            deal.llm_reason = f"LLM error — filtered ({type(e).__name__})"
+                            deal.llm_category = "General"
+                            deal.llm_genuine = False
 
             scored_deals.extend(batch)
 
@@ -218,6 +235,11 @@ class DealAnalyser:
         )
         return passing
 
+_analyser_instance = None
+
 def analyse_deals(deals: list[Deal]) -> list[Deal]:
     """Legacy wrapper for backward compatibility."""
-    return DealAnalyser().analyse_deals(deals)
+    global _analyser_instance
+    if _analyser_instance is None:
+        _analyser_instance = DealAnalyser()
+    return _analyser_instance.analyse_deals(deals)

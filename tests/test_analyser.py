@@ -97,5 +97,63 @@ class TestDealAnalyserPrompt(unittest.TestCase):
         self.assertIn("Deal 3:", prompt)
         self.assertIn("Product 3", prompt)
 
+class TestDealAnalyserFixes(unittest.TestCase):
+    @patch.dict('os.environ', {}, clear=True)
+    def test_get_client_raises_value_error_without_api_key(self):
+        with self.assertRaises(ValueError) as ctx:
+            DealAnalyser()
+        self.assertIn("GEMINI_API_KEY environment variable is not set", str(ctx.exception))
+
+    def test_sanitize_text(self):
+        with patch.object(DealAnalyser, '_get_client', return_value=None):
+            analyser = DealAnalyser()
+        self.assertEqual(analyser._sanitize_text("Normal Title"), "Normal Title")
+        self.assertEqual(analyser._sanitize_text("Title <with> tags"), "Title &lt;with&gt; tags")
+        self.assertEqual(analyser._sanitize_text(""), "")
+        self.assertEqual(analyser._sanitize_text(None), "")
+
+    def test_attach_scores_fail_closed_on_missing_index(self):
+        with patch.object(DealAnalyser, '_get_client', return_value=None):
+            analyser = DealAnalyser()
+
+        from src.analyser import DealScore
+        deal1 = Deal(id="1", source="test", title="Deal 1", url="url")
+        deal2 = Deal(id="2", source="test", title="Deal 2", url="url")
+        
+        # Only return score for deal 1
+        results = [
+            DealScore(deal_index=1, score=8, genuine_discount=True, reason="Great", category="Tech")
+        ]
+        
+        analyser._attach_scores([deal1, deal2], results)
+        
+        # Deal 1 should have correct score
+        self.assertEqual(deal1.llm_score, 8)
+        self.assertEqual(deal1.llm_reason, "Great")
+        self.assertTrue(deal1.llm_genuine)
+        
+        # Deal 2 (missing index) should fail-closed (score 1)
+        self.assertEqual(deal2.llm_score, 1)
+        self.assertEqual(deal2.llm_reason, "Error: No LLM score returned")
+        self.assertFalse(deal2.llm_genuine)
+
+    @patch('src.analyser.DealAnalyser')
+    def test_legacy_wrapper_singleton(self, mock_analyser_class):
+        mock_instance = MagicMock()
+        mock_analyser_class.return_value = mock_instance
+        
+        from src.analyser import analyse_deals, _analyser_instance
+        
+        # Reset the global singleton instance if any
+        import src.analyser
+        src.analyser._analyser_instance = None
+        
+        deals = [Deal(id="1", source="test", title="Deal 1", url="url")]
+        analyse_deals(deals)
+        analyse_deals(deals)
+        
+        # Ensure DealAnalyser was instantiated only once
+        mock_analyser_class.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()
