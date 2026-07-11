@@ -175,15 +175,23 @@ def run() -> int:
         # ----------------------------------------------------------------
         logger.info("--- Step 1: Fetching deals ---")
         all_deals = []
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        for fetcher in fetchers:
-            fetcher_name = fetcher.__class__.__name__
+        def fetch_from_source(f):
+            fetcher_name = f.__class__.__name__
             try:
-                deals = fetcher.fetch()
+                deals = f.fetch()
                 logger.info(f"{fetcher_name}: {len(deals)} deals")
-                all_deals.extend(deals)
+                return deals
             except Exception as e:
-                logger.error(f"Error in {fetcher_name}: {e}")
+                logger.error(f"Error in {fetcher_name}: {e}", exc_info=True)
+                return []
+
+        max_workers = len(fetchers) if fetchers else 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fetch_from_source, f): f for f in fetchers}
+            for future in as_completed(futures):
+                all_deals.extend(future.result())
 
         logger.info(f"Total deals fetched: {len(all_deals)}")
 
@@ -220,10 +228,22 @@ def run() -> int:
         # Step 3.5: Live price verification crawler
         # ----------------------------------------------------------------
         logger.info("--- Step 3.5: Live price verification ---")
-        verified_deals = []
-        for deal in quality_deals:
-            if verify_deal_price(deal):
-                verified_deals.append(deal)
+        from concurrent.futures import ThreadPoolExecutor
+
+        def verify_single_deal(d):
+            try:
+                if verify_deal_price(d):
+                    return d
+            except Exception as e:
+                logger.error(f"Error verifying price for '{d.title}': {e}")
+            return None
+
+        max_workers = min(len(quality_deals), 10) if quality_deals else 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # We map verify_single_deal over quality_deals
+            results = executor.map(verify_single_deal, quality_deals)
+            verified_deals = [d for d in results if d is not None]
+
         quality_deals = verified_deals
         logger.info(f"Quality deals after live verification: {len(quality_deals)}")
 

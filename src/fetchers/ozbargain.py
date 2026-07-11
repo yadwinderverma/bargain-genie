@@ -69,7 +69,17 @@ def _get_ozbargain_feed():
     now = time.time()
     if _cached_feed is None or now - _cached_time > 60:
         logger.info(f"Fetching OzBargain RSS feed: {OZBARGAIN_RSS_URL}")
-        _cached_feed = feedparser.parse(OZBARGAIN_RSS_URL)
+        try:
+            import requests
+            headers = {
+                "User-Agent": "UniversalFeedParser/6.0.11"
+            }
+            response = requests.get(OZBARGAIN_RSS_URL, headers=headers, timeout=15)
+            response.raise_for_status()
+            _cached_feed = feedparser.parse(response.text)
+        except Exception as e:
+            logger.warning(f"Failed to fetch OzBargain feed via requests ({e}), falling back to direct feedparser parse...")
+            _cached_feed = feedparser.parse(OZBARGAIN_RSS_URL)
         _cached_time = now
     return _cached_feed
 

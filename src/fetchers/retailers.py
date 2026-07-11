@@ -365,26 +365,38 @@ class RetailerFetcher(DealFetcher):
         if not api_key:
             return []
 
-        all_deals = []
-        seen_urls: set[str] = set()
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        for query_def in SEARCH_QUERIES:
+        def process_query(query_def):
             if isinstance(query_def, str):
                 product_query = query_def
             elif isinstance(query_def, dict):
                 product_query = " ".join(query_def.get("keywords", []))
             else:
-                continue
+                return []
 
             logger.info(f"Shopping price check: '{product_query}'")
-            results = _fetch_shopping_results(product_query, api_key)
-            deals = _analyse_prices(query_def, results)
+            try:
+                results = _fetch_shopping_results(product_query, api_key)
+                deals = _analyse_prices(query_def, results)
+                logger.info(f"  → {len(deals)} quality deals for '{product_query}'")
+                return deals
+            except Exception as e:
+                logger.error(f"Error processing query '{product_query}': {e}", exc_info=True)
+                return []
 
-            fresh = [d for d in deals if d.url not in seen_urls]
-            seen_urls.update(d.url for d in fresh)
-            all_deals.extend(fresh)
-            logger.info(f"  → {len(fresh)} quality deals for '{product_query}'")
-            time.sleep(0.5)
+        all_deals = []
+        seen_urls: set[str] = set()
+
+        max_workers = min(len(SEARCH_QUERIES), 10) if SEARCH_QUERIES else 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_query, q): q for q in SEARCH_QUERIES}
+            for future in as_completed(futures):
+                deals = future.result()
+                for d in deals:
+                    if d.url not in seen_urls:
+                        seen_urls.add(d.url)
+                        all_deals.append(d)
 
         logger.info(f"Retailers total: {len(all_deals)} deals across {len(SEARCH_QUERIES)} products")
         return all_deals
