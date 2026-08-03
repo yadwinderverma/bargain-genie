@@ -1,14 +1,7 @@
 {
-  "retail_c19268da4750626b21524ec6cbc1f231": {
-    "seen_at": "2026-06-29T14:03:35.581757+00:00",
-    "title": "AirPods Pro Apple",
-    "source": "kogan",
-    "alerted": true
-  },
-  "retail_07104c5ec95d5125c5dc001534fa6116": {
-    "seen_at": "2026-06-30T23:06:11.683747+00:00",
-    "title": "Apple AirPods Pro 1st Gen",
-    "source": "amazon_au",
-    "alerted": true
+  "ozb_970065 at https://www.ozbargain.com.au": {
+    "seen_at": "2026-08-03T12:54:36.797905+00:00",
+    "title": "Apple iPad Air M4 11\" Wi‑Fi 256GB (Space Grey) $1247, Apple AirPods Pro 3 $347 + Delivery ($0 C&C/ in-Store) @ Harvey Norman",
+    "source": "ozbargain"
   }
 }
