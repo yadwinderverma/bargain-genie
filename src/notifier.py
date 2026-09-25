@@ -33,11 +33,15 @@ SOURCE_EMOJI = {
     "serper_shopping": "🔍",
 }
 
-SCORE_EMOJI = {
-    range(9, 11): "🏆",
-    range(7, 9): "⭐",
-    range(5, 7): "👍",
-}
+def _mrkdwn(text: str) -> str:
+    """Escape text that would break a Slack mrkdwn link or mention."""
+    return (
+        (text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("|", "/")
+    )
 
 
 class SlackNotifier:
@@ -57,10 +61,30 @@ class SlackNotifier:
         return "💰"
 
     def _get_score_emoji(self, score: int) -> str:
-        for score_range, emoji in SCORE_EMOJI.items():
-            if score in score_range:
-                return emoji
+        if 9 <= score <= 10:
+            return "🏆"
+        if 7 <= score <= 8:
+            return "⭐"
+        if 5 <= score <= 6:
+            return "👍"
         return "💡"
+
+    def _redact(self, message: str) -> str:
+        if self.webhook_url and self.webhook_url in message:
+            return message.replace(self.webhook_url, "***REDACTED***")
+        return message
+
+    def _link(self, url: str, label: str) -> str:
+        safe_label = _mrkdwn(label) or "link"
+        if (
+            url
+            and url.startswith(("http://", "https://"))
+            and ">" not in url
+            and "|" not in url
+            and " " not in url
+        ):
+            return f"<{url}|{safe_label}>"
+        return safe_label
 
 
     def _format_price(self, price: float | None) -> str:
@@ -100,8 +124,9 @@ class SlackNotifier:
         if deal.llm_category:
             context_parts.append(f"📦 {deal.llm_category}")
 
-        safe_title = deal.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        title_text = f"<{deal.url}|{safe_title}>" if deal.url else safe_title
+        title_text = self._link(deal.url, deal.title)
+        if deal.merchant_url and deal.merchant_url.rstrip("/") != (deal.url or "").rstrip("/"):
+            context_parts.append(self._link(deal.merchant_url, "Retailer page"))
 
         blocks = [
             {
@@ -120,10 +145,11 @@ class SlackNotifier:
         ]
 
         if deal.llm_reason:
+            reason = _mrkdwn(" ".join(deal.llm_reason.split()))
             blocks.append({
                 "type": "context",
                 "elements": [
-                    {"type": "mrkdwn", "text": f"💬 _{deal.llm_reason}_"},
+                    {"type": "mrkdwn", "text": f"💬 _{reason[:240]}_"},
                 ],
             })
 
@@ -187,35 +213,42 @@ class SlackNotifier:
             deals = deals[:MAX_SLACK_ALERTS_PER_RUN]
 
         run_time = datetime.now(timezone.utc).strftime("%d %b %Y, %I:%M %p UTC")
-        blocks = self._build_summary_header(deals, run_time)
-
-        for deal in deals:
-            blocks.extend(self._build_deal_block(deal))
-
-        # Slack has a 50-block limit per message — split if needed
-        MAX_BLOCKS = 50
-        block_chunks = [blocks[i : i + MAX_BLOCKS] for i in range(0, len(blocks), MAX_BLOCKS)]
+        messages = self._pack_messages(deals, run_time)
+        mention = f"{SLACK_NOTIFY_USER} " if SLACK_NOTIFY_USER else ""
+        fallback = f"{mention}🛍️ {len(deals)} bargain{'s' if len(deals) != 1 else ''} found on your watchlist!"
 
         success = True
-        for chunk_idx, chunk in enumerate(block_chunks):
-            payload = {
-                "blocks": chunk,
-                "text": f"{''+SLACK_NOTIFY_USER+' ' if SLACK_NOTIFY_USER else ''}🛍️ {len(deals)} bargain{'s' if len(deals) != 1 else ''} found on your watchlist!",
-            }
-
+        for chunk_idx, chunk in enumerate(messages):
+            payload = {"blocks": chunk, "text": fallback}
             try:
                 response = requests.post(self.webhook_url, json=payload, timeout=15)
                 response.raise_for_status()
-                logger.info(f"Slack message {chunk_idx + 1}/{len(block_chunks)} sent successfully")
-            except requests.RequestException as e:
-                error_msg = str(e)
-                if self.webhook_url:
-                    error_msg = error_msg.replace(self.webhook_url, "***REDACTED***")
-                error_msg = str(e).replace(self.webhook_url, "***REDACTED***") if self.webhook_url else str(e)
-                logger.error(f"Failed to send Slack message chunk {chunk_idx + 1}: {error_msg}")
+                logger.info("Slack message %s/%s sent successfully", chunk_idx + 1, len(messages))
+            except requests.RequestException as exc:
+                logger.error(
+                    f"Failed to send Slack message chunk {chunk_idx + 1}: {self._redact(str(exc))}"
+                )
                 success = False
 
         return success
+
+    def _pack_messages(self, deals: list[Deal], run_time: str) -> list[list[dict]]:
+        """Pack blocks without splitting a deal across Slack's 50-block limit."""
+        header = self._build_summary_header(deals, run_time)
+        messages: list[list[dict]] = []
+        current = list(header)
+        for deal in deals:
+            blocks = self._build_deal_block(deal)
+            if len(current) + len(blocks) > 50 and len(current) > 1:
+                messages.append(current)
+                current = [{
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "More deals from this run:"},
+                }]
+            current.extend(blocks)
+        if current:
+            messages.append(current)
+        return messages
 
     def send_slack_no_deals_message(self) -> None:
         """Send a brief 'no deals found' message (optional, can be disabled)."""
@@ -239,19 +272,9 @@ class SlackNotifier:
         }
         try:
             requests.post(self.webhook_url, json=payload, timeout=15)
-        except requests.RequestException as e:
-            error_msg = str(e)
-            if self.webhook_url:
-                error_msg = error_msg.replace(self.webhook_url, "***REDACTED***")
-            error_msg = str(e).replace(self.webhook_url, "***REDACTED***") if self.webhook_url else str(e)
-            logger.error(f"Failed to send error message to Slack: {error_msg}")
+        except requests.RequestException as exc:
+            logger.error(f"Failed to send error message to Slack: {self._redact(str(exc))}")
 
-# Legacy functions
-def send_slack_alerts(deals: list[dict]) -> bool:
-    pass
-
-def send_slack_no_deals_message() -> None:
-    SlackNotifier().send_slack_no_deals_message()
 
 def send_slack_error_message(error: str) -> None:
     SlackNotifier().send_slack_error_message(error)

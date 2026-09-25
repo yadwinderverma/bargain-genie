@@ -77,6 +77,19 @@ def test_get_source_emoji_partial_match(notifier):
     assert notifier._get_source_emoji("some_amazon_deal") == "📦"
     assert notifier._get_source_emoji("ozbargain_freebie_thread") == "🆓"
 
+def test_title_pipe_does_not_break_the_slack_link(notifier):
+    deal = Deal(
+        id="pipe",
+        title="AirPods Pro | Black",
+        source="ozbargain",
+        url="https://example.com/a",
+        sale_price=50,
+        llm_score=8,
+    )
+    blocks = notifier._build_deal_block(deal)
+    assert "<https://example.com/a|AirPods Pro / Black>" in blocks[0]["text"]["text"]
+
+
 def test_get_source_emoji_fallback(notifier):
     """Test that unknown sources return the fallback emoji."""
     assert notifier._get_source_emoji("unknown_source") == "💰"

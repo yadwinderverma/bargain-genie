@@ -48,6 +48,15 @@ def test_matches_product_dict_query_case_insensitive():
     query = {"keywords": ["Shokz", "OPENFIT", "2"]}
     assert _matches_product("shokz openfit 2", query) is True
 
+def test_model_number_ignores_warranty_and_pack_counts():
+    query = {"keywords": ["powerbeats", "pro", "2"]}
+    assert _matches_product("Beats Powerbeats Pro 2", query) is True
+    assert _matches_product("Beats Powerbeats Pro Black 2", query) is True
+    assert _matches_product("Beats Powerbeats Pro 2, 2 year warranty", query) is True
+    assert _matches_product("Beats Powerbeats Pro, 2 year warranty", query) is False
+    assert _matches_product("Beats Powerbeats Pro pack of 2", query) is False
+
+
 def test_matches_product_dict_query_missing_keyword():
     query = {"keywords": ["shokz", "openfit", "2"]}
     assert _matches_product("Shokz OpenFit Air", query) is False
@@ -175,6 +184,93 @@ def test_match_trusted_retailer_marketplace():
     assert _match_trusted_retailer("Amazon.com.au - Merchant Z") is None
     assert _match_trusted_retailer("Amazon.com.au") == "Amazon AU"
     assert _match_trusted_retailer("Kogan.com") == "Kogan"
+
+
+def test_officeworks_alone_is_not_treated_as_a_deal():
+    from src.fetchers.retailers import _analyse_prices
+
+    deals = _analyse_prices(
+        {"keywords": ["widget"]},
+        [{
+            "source": "officeworks.com.au",
+            "title": "Widget",
+            "link": "https://www.officeworks.com.au/widget",
+            "price": "$100",
+        }],
+    )
+    assert deals == []
+
+
+def test_officeworks_cheapest_of_two_is_a_deal():
+    from src.fetchers.retailers import _analyse_prices
+
+    deals = _analyse_prices(
+        {"keywords": ["widget"]},
+        [
+            {
+                "source": "officeworks.com.au",
+                "title": "Widget",
+                "link": "https://www.officeworks.com.au/widget",
+                "price": "$80",
+            },
+            {
+                "source": "jbhifi.com.au",
+                "title": "Widget",
+                "link": "https://www.jbhifi.com.au/widget",
+                "price": "$120",
+            },
+        ],
+    )
+    assert len(deals) == 1
+    assert deals[0].source == "officeworks"
+    assert deals[0].sale_price == 80
+    assert deals[0].price_beat_retailer is True
+
+
+def test_single_retailer_with_a_real_discount_is_a_deal():
+    from src.fetchers.retailers import _analyse_prices
+
+    deals = _analyse_prices(
+        {"keywords": ["widget"]},
+        [{
+            "source": "jbhifi.com.au",
+            "title": "Widget",
+            "link": "https://www.jbhifi.com.au/widget",
+            "price": "$50",
+            "originalPrice": "$100",
+        }],
+    )
+    assert len(deals) == 1
+    assert deals[0].discount_pct == 50
+
+
+def test_accessory_price_is_not_a_discount_against_the_real_product():
+    from src.fetchers.retailers import _analyse_prices
+
+    deals = _analyse_prices(
+        {"keywords": ["mower"]},
+        [
+            {
+                "source": "amazon.com.au",
+                "title": "Mower",
+                "link": "https://www.amazon.com.au/blade",
+                "price": "$20",
+            },
+            {
+                "source": "jbhifi.com.au",
+                "title": "Mower",
+                "link": "https://www.jbhifi.com.au/mower",
+                "price": "$500",
+            },
+            {
+                "source": "officeworks.com.au",
+                "title": "Mower",
+                "link": "https://www.officeworks.com.au/mower",
+                "price": "$800",
+            },
+        ],
+    )
+    assert deals == []
 
 
 def test_matches_product_global_excludes():

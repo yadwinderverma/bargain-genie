@@ -12,6 +12,7 @@ Strategy:
 
 import hashlib
 import logging
+import math
 import os
 import re
 import time
@@ -23,6 +24,7 @@ import requests
 from config import MIN_DISCOUNT_PERCENT, SEARCH_QUERIES, SERPER_ENABLED, GLOBAL_EXCLUDES
 from src.models import Deal
 from src.fetchers.base import DealFetcher
+from src.watchlist import matches_query
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +105,13 @@ def _compile_query(query_def):
         kw_regexes = [re.compile(rf"\b{re.escape(kw)}\b") for kw in keywords]
         ex_regexes = [re.compile(rf"\b{re.escape(ex)}\b") for ex in excludes]
 
-        return {"type": "dict", "keywords": kw_regexes, "excludes": ex_regexes}
+        return {
+            "type": "dict",
+            "keywords": kw_regexes,
+            "excludes": ex_regexes,
+            "keyword_texts": keywords,
+            "exclude_texts": excludes,
+        }
     return None
 
 
@@ -121,30 +129,27 @@ def _matches_product(title: str, parsed_query) -> bool:
     if not parsed_query:
         return False
 
-    title_lower = title.lower()
+    if parsed_query.get("type") == "dict":
+        query = {
+            "keywords": parsed_query.get("keyword_texts") or [],
+            "exclude": parsed_query.get("exclude_texts") or [],
+        }
+        return matches_query(title, "", query)
 
-    # Check global excludes first
+    title_lower = title.lower()
     has_any_global_exclude = any(bool(ex_re.search(title_lower)) for ex_re in _COMPILED_GLOBAL_EXCLUDES)
     if has_any_global_exclude:
-        logger.debug(f"Title '{title}' matched global exclude pattern")
+        logger.debug("Title '%s' matched global exclude pattern", title)
         return False
 
     if parsed_query["type"] == "str":
         return all(kw in title_lower for kw in parsed_query["words"])
-    elif parsed_query["type"] == "dict":
-        if not parsed_query["keywords"]:
-            return False
-
-        has_all_keywords = all(bool(kw_re.search(title_lower)) for kw_re in parsed_query["keywords"])
-        has_any_exclude = any(bool(ex_re.search(title_lower)) for ex_re in parsed_query["excludes"])
-
-        return has_all_keywords and not has_any_exclude
 
     return False
 
 
 def _fetch_shopping_results(query: str, api_key: str) -> list[dict]:
-    """Run a Google Shopping search — 1 call per product."""
+    """Run one Google Shopping search. Retries rate limits and server errors."""
     headers = {
         "X-API-KEY": api_key,
         "Content-Type": "application/json",
@@ -155,19 +160,46 @@ def _fetch_shopping_results(query: str, api_key: str) -> list[dict]:
         "hl": "en",
         "num": 20,
     }
-    try:
-        response = requests.post(SERPER_SHOPPING_URL, json=payload, headers=headers, timeout=15)
+    for attempt in range(1, 4):
+        try:
+            response = requests.post(SERPER_SHOPPING_URL, json=payload, headers=headers, timeout=15)
+        except requests.RequestException as exc:
+            logger.warning("Serper request failed for '%s' (attempt %s): %s", query, attempt, exc)
+            if attempt == 3:
+                return []
+            time.sleep(attempt)
+            continue
+
         if response.status_code == 403:
             logger.error(
-                f"Serper 403 — check SERPER_API_KEY is valid at serper.dev. "
-                f"Response: {response.text[:200]}"
+                "Serper 403 for '%s'. Check SERPER_API_KEY at serper.dev. Response: %s",
+                query,
+                response.text[:200],
             )
             return []
-        response.raise_for_status()
-        return response.json().get("shopping", [])
-    except requests.RequestException as e:
-        logger.error(f"Serper Shopping search failed for '{query}': {e}")
-        return []
+        if response.status_code in (429, 500, 502, 503, 504):
+            logger.warning("Serper HTTP %s for '%s' (attempt %s)", response.status_code, query, attempt)
+            if attempt == 3:
+                return []
+            time.sleep(attempt)
+            continue
+        try:
+            response.raise_for_status()
+            return response.json().get("shopping", [])
+        except (requests.RequestException, ValueError) as exc:
+            logger.error("Serper search failed for '%s': %s", query, exc)
+            return []
+    return []
+
+
+def _median(sorted_prices: list[float]) -> float:
+    count = len(sorted_prices)
+    if count == 0:
+        return 0.0
+    midpoint = count // 2
+    if count % 2:
+        return sorted_prices[midpoint]
+    return (sorted_prices[midpoint - 1] + sorted_prices[midpoint]) / 2
 
 
 def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
@@ -238,11 +270,10 @@ def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
 
     prices = sorted(p["current_price"] for p in trusted)
     market_low = prices[0]
-    market_median = prices[len(prices) // 2]
+    market_median = _median(prices)
 
-    # Statistical outlier filter: remove prices that are less than 30% of the median.
-    # This prevents an accessory (e.g. $20) from matching a main product (e.g. $500 lawn mower)
-    # and being seen as a huge discount.
+    # Drop prices under 30% of the median. A $20 accessory must not become a
+    # 90% "discount" on a $500 product.
     valid_trusted = []
     skipped_outlier = 0
     for item in trusted:
@@ -262,7 +293,7 @@ def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
     # Recalculate prices without outliers
     prices = sorted(p["current_price"] for p in trusted)
     market_low = prices[0]
-    market_median = prices[len(prices) // 2]
+    market_median = _median(prices)
 
     # Use median as the "normal" price — much more stable than max which can be wildly inflated
     logger.info(
@@ -286,32 +317,32 @@ def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
         # Discount vs median trusted-retailer price
         vs_median = round((1 - current_price / market_median) * 100, 1) if market_median > 0 else 0
 
-        is_cheapest = current_price == market_low
+        # One listing is always the cheapest. The price-beat signal needs a second retailer.
+        compared_market = len(trusted) >= 2
+        is_cheapest = math.isclose(current_price, market_low, rel_tol=1e-3, abs_tol=0.01)
         is_near_cheapest = current_price <= market_low * 1.05
 
         should_include = False
         deal_reason = ""
 
-        if is_officeworks:
-            # Officeworks: flag if cheapest or near-cheapest — price-beat guarantee
-            # means this is likely the best available price in AU
-            if is_cheapest:
-                should_include = True
-                deal_reason = f"Cheapest in AU at ${current_price:.0f} — Officeworks price-beat guarantee"
-            elif is_near_cheapest:
-                should_include = True
-                deal_reason = f"Near-cheapest at ${current_price:.0f} (within 5% of market low ${market_low:.0f})"
-            elif vs_median >= MIN_DISCOUNT_PERCENT:
-                should_include = True
-                deal_reason = f"{vs_median:.0f}% below median market price of ${market_median:.0f}"
-        else:
-            # Other trusted retailers: need a real discount
-            if own_discount is not None and own_discount >= MIN_DISCOUNT_PERCENT:
-                should_include = True
-                deal_reason = f"{own_discount:.0f}% off (${original_price:.0f} → ${current_price:.0f})"
-            elif vs_median >= MIN_DISCOUNT_PERCENT:
-                should_include = True
-                deal_reason = f"{vs_median:.0f}% below median market price of ${market_median:.0f}"
+        if is_officeworks and compared_market and is_cheapest:
+            should_include = True
+            deal_reason = (
+                f"Cheapest trusted price at ${current_price:.0f}. "
+                "Officeworks price-beat guarantee applies"
+            )
+        elif is_officeworks and compared_market and is_near_cheapest:
+            should_include = True
+            deal_reason = (
+                f"Near-cheapest at ${current_price:.0f} "
+                f"(within 5% of market low ${market_low:.0f})"
+            )
+        elif own_discount is not None and own_discount >= MIN_DISCOUNT_PERCENT:
+            should_include = True
+            deal_reason = f"{own_discount:.0f}% off (${original_price:.0f} to ${current_price:.0f})"
+        elif compared_market and vs_median >= MIN_DISCOUNT_PERCENT:
+            should_include = True
+            deal_reason = f"{vs_median:.0f}% below median market price of ${market_median:.0f}"
 
         if not should_include:
             logger.debug(
@@ -323,7 +354,7 @@ def _analyse_prices(query_def, results: list[dict]) -> list[dict]:
         display_discount = own_discount if own_discount else (vs_median if vs_median > 0 else None)
 
         deals.append(Deal(
-            id=f"retail_{hashlib.md5(item['link'].encode('utf-8')).hexdigest()}",
+            id=f"retail_{hashlib.md5(item['link'].encode('utf-8'), usedforsecurity=False).hexdigest()}",
             source=item["retailer"].lower().replace(" ", "_"),
             title=item["title"],
             url=item["link"],
@@ -398,9 +429,5 @@ class RetailerFetcher(DealFetcher):
                         seen_urls.add(d.url)
                         all_deals.append(d)
 
-        logger.info(f"Retailers total: {len(all_deals)} deals across {len(SEARCH_QUERIES)} products")
+        logger.info("Retailers total: %s deals across %s products", len(all_deals), len(SEARCH_QUERIES))
         return all_deals
-
-def fetch_retailer_deals() -> list[dict]:
-    # Legacy wrapper
-    pass

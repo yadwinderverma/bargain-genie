@@ -1,129 +1,92 @@
-# 🛍️ Bargain Hunter
+# Bargain Hunter
 
-Automated deal finder for Australian shoppers. Runs twice daily via GitHub Actions, searches for 50%+ discounts across OzBargain, JB Hi-Fi, Kogan, Catch, and Google Shopping, then sends the best deals to your Slack channel.
-
-## How It Works
+Finds Australian deals on a watchlist and sends the ones worth buying to Slack. A GitHub Action runs it twice a day.
 
 ```
-GitHub Actions (8am + 8pm AEST)
-    ↓
-Fetch deals from:
-  • OzBargain RSS feed (community-voted deals)
-  • Serper.dev Google Shopping API
-  • JB Hi-Fi, Kogan, Catch scrapers
-    ↓
-Filter: only new deals (not seen before)
-    ↓
-Gemini AI scores each deal 1–10
-  (checks for fake discounts, rates genuine value)
-    ↓
-Top deals (score ≥ 6) → Slack alert
-    ↓
-Cache updated in repo (prevents duplicate alerts)
+OzBargain RSS + Google Shopping (Serper)
+        |
+        v
+Drop deals already alerted or already rejected
+        |
+        v
+Gemini scores each deal against the watchlist
+        |
+        v
+Live page check: price still holds, and the item is in stock
+        |
+        v
+Slack, then the cache is updated
 ```
+
+OzBargain is the reliable source. Shopping results are a backstop for the same products at trusted Australian retailers.
 
 ## Setup
 
-### 1. Fork this repository
+1. Fork the repository.
+2. Create a Slack incoming webhook: [api.slack.com/apps](https://api.slack.com/apps), then Incoming Webhooks, then add it to a channel.
+3. Add these repository secrets (**Settings, Secrets and variables, Actions**):
 
-### 2. Get your free API keys
-
-| Service | Where to get it | Free tier |
-|---|---|---|
-| **Serper.dev** | [serper.dev](https://serper.dev) | 2,500 searches/month |
-| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com/app/apikey) | 15 req/min, 1,500/day |
-| **Slack Webhook** | Your Slack app settings (see below) | Free |
-
-### 3. Set up Slack Incoming Webhook
-
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
-2. Name it "Bargain Hunter", select your workspace
-3. Go to **Incoming Webhooks** → toggle **On**
-4. Click **Add New Webhook to Workspace** → select your channel
-5. Copy the webhook URL
-
-### 4. Add GitHub Secrets
-
-In your repo: **Settings → Secrets and variables → Actions → New repository secret**
-
-| Secret name | Value |
+| Secret | Where it comes from |
 |---|---|
-| `SERPER_API_KEY` | Your Serper.dev API key |
-| `GEMINI_API_KEY` | Your Google AI Studio API key |
-| `SLACK_WEBHOOK_URL` | Your Slack webhook URL |
+| `SERPER_API_KEY` | [serper.dev](https://serper.dev). Free tier is 2,500 searches a month. |
+| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| `SLACK_WEBHOOK_URL` | The webhook from step 2 |
 
-### 5. Enable GitHub Actions
+4. Open the Actions tab and enable workflows if GitHub asks.
+5. Run **Bargain Hunter** once by hand to confirm the webhook and the keys.
 
-Go to the **Actions** tab in your repo and enable workflows if prompted.
-
-### 6. Test it
-
-Go to **Actions → Bargain Hunter → Run workflow** to trigger a manual run.
-
-## Configuration
-
-Edit `config.py` to customise:
-
-```python
-MIN_DISCOUNT_PERCENT = 50       # Minimum % off (default: 50%)
-MIN_OZBARGAIN_VOTES = 10        # Min community votes on OzBargain
-LLM_MIN_SCORE = 6               # Min AI score to send alert (1-10)
-MAX_SLACK_ALERTS_PER_RUN = 10   # Max alerts per run (avoid spam)
-
-SEARCH_QUERIES = [              # What to search for
-    "electronics deals Australia",
-    "laptop deals Australia",
-    # Add your own...
-]
-```
-
-## Schedule
-
-Runs at:
-- **8:00 AM AEST** (22:00 UTC previous day)
-- **8:00 PM AEST** (10:00 UTC)
-
-To change the schedule, edit the `cron` values in `.github/workflows/bargain_hunt.yml`.
-
-## Project Structure
-
-```
-bargain-hunter/
-├── .github/workflows/
-│   └── bargain_hunt.yml      # GitHub Actions workflow
-├── src/
-│   ├── fetchers/
-│   │   ├── ozbargain.py      # OzBargain RSS parser
-│   │   ├── serper.py         # Google Shopping via Serper API
-│   │   └── retailers.py      # JB Hi-Fi, Kogan, Catch scrapers
-│   ├── analyser.py           # Gemini AI deal scoring
-│   ├── cache.py              # Deduplication (JSON file in repo)
-│   └── notifier.py           # Slack Block Kit messages
-├── data/
-│   └── deals_cache.json      # Auto-updated by bot
-├── config.py                 # All settings in one place
-├── main.py                   # Entry point
-└── requirements.txt
-```
-
-## Running Locally
+Install and run locally:
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Set environment variables
-export SERPER_API_KEY="your_key"
-export GEMINI_API_KEY="your_key"
+export SERPER_API_KEY="..."
+export GEMINI_API_KEY="..."
 export SLACK_WEBHOOK_URL="https://hooks.slack.com/..."
-
-# Run
+pytest -q
 python main.py
 ```
 
-## Notes
+## What gets sent
 
-- The `data/deals_cache.json` file is committed back to the repo after each run to track seen deals
-- Retailer scrapers may break if sites update their HTML — check logs if a source stops working
-- OzBargain RSS is the most reliable source (no scraping, community-validated)
-- Gemini AI checks for "fake" discounts where retailers inflate the original price
+Edit `config.py`. Each query is one product: every keyword has to appear, and a model number such as `2` has to sit next to another keyword in the title. Garden tools are separate queries (lawn mower, leaf blower, line trimmer, whipper snipper).
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MIN_DISCOUNT_PERCENT` | 40 | Retailer discount required when there is no OzBargain vote signal |
+| `MIN_OZBARGAIN_VOTES` | 10 | Upvotes that can surface an on-watchlist OzBargain deal |
+| `OZBARGAIN_MIN_VOTES_TRUSTED` | 5 | Upvotes that mark a deal as community validated |
+| `LLM_MIN_SCORE` | 6 | Minimum Gemini score (1-10) |
+| `MAX_SLACK_ALERTS_PER_RUN` | 10 | Extra deals wait for the next run |
+| `OZBARGAIN_FREEBIES_MIN_VOTES` | 20 | Freebies need more votes, and they still have to match the watchlist |
+| `VERIFY_PRICES_LIVE` | True | Fetch the product page before sending |
+
+The schedule in `.github/workflows/bargain_hunt.yml` is UTC. 22:00 and 10:00 UTC are 8am and 8pm in Australian Eastern Standard Time. During daylight saving those runs land an hour later.
+
+## How a deal is judged
+
+*   **OzBargain votes** come from the feed (`votes-pos`), not from the description. The merchant link on the feed is what the price check opens. Slack still links to the OzBargain post.
+*   **`$0 C&C` and free shipping** are delivery terms. The product price is the amount in front of that clause.
+*   **A handset on a monthly plan** is skipped. The `$0` is the phone on a contract.
+*   **Gemini** has to call the discount genuine before an OzBargain vote boost is applied. A failed model call is retried on the next run.
+*   **The live check** confirms the price closest to the deal. A cheaper accessory on the same page does not replace it. If the retailer blocks the fetch, the deal is still sent. A confirmed higher price, an out-of-stock page, or a non-public URL is dropped.
+*   **Officeworks** is flagged as cheapest only when another trusted retailer has a price as well.
+*   **The cache** records a deal after Slack accepts it, or after a real rejection. A failed webhook leaves the deal open. A later price at least 5% lower is scored again. Rows from older runs have no status and stay settled for their remaining cache life (`CACHE_MAX_AGE_DAYS`, default 7).
+
+## Layout
+
+```
+.github/workflows/bargain_hunt.yml   schedule, tests, then the hunt
+config.py                            watchlist and thresholds
+main.py                              one run
+src/fetchers/ozbargain.py            RSS
+src/fetchers/retailers.py            Google Shopping via Serper
+src/analyser.py                      Gemini scores
+src/price_check.py                   live price and stock check
+src/cache.py                         data/deals_cache.json
+src/notifier.py                      Slack
+src/dedupe.py                        same listing from two sources
+```
+
+The workflow commits `data/deals_cache.json` after a successful run. Tests run first, so a broken tree does not send alerts.
+
+Retailer pages and the Shopping API both change. When a source goes quiet, the Action log is the place to look. OzBargain's feed is the one that does not depend on a retailer's HTML.

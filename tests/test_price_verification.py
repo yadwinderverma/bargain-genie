@@ -110,3 +110,73 @@ def test_verify_deal_price_fallback_present(mock_get, base_deal):
     mock_get.return_value = mock_response
     
     assert verify_deal_price(base_deal) is True
+
+
+@patch("requests.get")
+def test_accessory_price_does_not_replace_the_product_price(mock_get, base_deal):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b" "
+    mock_response.text = """
+    <html>
+      <script type="application/ld+json">
+        {"@type": "Product", "name": "Case", "offers": {"price": "19.95"}}
+      </script>
+      <script type="application/ld+json">
+        {
+          "@type": "Product",
+          "name": "Apple AirPods Pro",
+          "offers": {
+            "price": "170.00",
+            "availability": "https://schema.org/InStock"
+          }
+        }
+      </script>
+      <body>The case is out of stock. AirPods Pro are $170.</body>
+    </html>
+    """
+    mock_get.return_value = mock_response
+
+    assert verify_deal_price(base_deal) is True
+    assert base_deal.sale_price == 170.0
+
+
+@patch("requests.get")
+def test_in_stock_schema_ignores_unrelated_out_of_stock_text(mock_get, base_deal):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b" "
+    mock_response.text = """
+    <html>
+      <script type="application/ld+json">
+        {
+          "@type": "Product",
+          "offers": {"price": "170.00", "availability": "https://schema.org/InStock"}
+        }
+      </script>
+      <body>Related products are out of stock.</body>
+    </html>
+    """
+    mock_get.return_value = mock_response
+
+    assert verify_deal_price(base_deal) is True
+    assert base_deal.sale_price == 170.0
+
+
+@patch("requests.get")
+def test_unsafe_url_is_not_fetched(mock_get, base_deal):
+    base_deal.url = "http://169.254.169.254/latest/meta-data"
+    base_deal.merchant_url = ""
+    assert verify_deal_price(base_deal) is False
+    mock_get.assert_not_called()
+
+
+@patch("requests.get")
+def test_redirect_to_a_private_address_is_not_followed(mock_get, base_deal):
+    mock_response = MagicMock()
+    mock_response.status_code = 302
+    mock_response.headers = {"Location": "http://169.254.169.254/latest/meta-data"}
+    mock_get.return_value = mock_response
+
+    assert verify_deal_price(base_deal) is False
+    assert mock_get.call_count == 1

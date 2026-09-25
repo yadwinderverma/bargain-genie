@@ -2,12 +2,15 @@ name: Bargain Hunter
 
 on:
   schedule:
-    # 8am AEST = 22:00 UTC (previous day)
+    # GitHub cron is UTC and does not follow daylight saving.
+    # 22:00 UTC is 8:00 AEST / 9:00 AEDT. 10:00 UTC is 20:00 AEST / 21:00 AEDT.
     - cron: '0 22 * * *'
-    # 8pm AEST = 10:00 UTC
     - cron: '0 10 * * *'
-  # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
+
+concurrency:
+  group: bargain-hunt
+  cancel-in-progress: false
 
 jobs:
   hunt:
@@ -32,6 +35,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q
 
       - name: Run Bargain Hunter
         env:

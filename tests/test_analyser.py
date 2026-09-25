@@ -132,10 +132,11 @@ class TestDealAnalyserFixes(unittest.TestCase):
         self.assertEqual(deal1.llm_reason, "Great")
         self.assertTrue(deal1.llm_genuine)
         
-        # Deal 2 (missing index) should fail-closed (score 1)
+        # Deal 2 (missing index) should fail-closed (score 1) as a real decision.
         self.assertEqual(deal2.llm_score, 1)
         self.assertEqual(deal2.llm_reason, "Error: No LLM score returned")
         self.assertFalse(deal2.llm_genuine)
+        self.assertFalse(deal2.analysis_error)
 
     @patch('src.analyser.DealAnalyser')
     def test_legacy_wrapper_singleton(self, mock_analyser_class):
@@ -154,6 +155,31 @@ class TestDealAnalyserFixes(unittest.TestCase):
         
         # Ensure DealAnalyser was instantiated only once
         mock_analyser_class.assert_called_once()
+
+    def test_ozbargain_boost_requires_a_genuine_discount(self):
+        with patch.object(DealAnalyser, "_get_client", return_value=None):
+            analyser = DealAnalyser()
+
+        from src.analyser import DealScore
+
+        genuine = Deal(
+            id="1", source="ozbargain", title="Real", url="https://example.com/1",
+            community_validated=True,
+        )
+        fake = Deal(
+            id="2", source="ozbargain", title="Fake", url="https://example.com/2",
+            community_validated=True,
+        )
+        analyser._attach_scores(
+            [genuine, fake],
+            [
+                DealScore(deal_index=1, score=6, genuine_discount=True, reason="Real", category="Audio"),
+                DealScore(deal_index=2, score=6, genuine_discount=False, reason="Fake", category="Audio"),
+            ],
+        )
+        self.assertEqual(genuine.llm_score, 8)
+        self.assertFalse(genuine.analysis_error)
+        self.assertEqual(fake.llm_score, 6)
 
 if __name__ == '__main__':
     unittest.main()

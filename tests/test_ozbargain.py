@@ -215,3 +215,143 @@ def test_parse_votes_invalid_tag():
         "tags": [{"term": "vote please"}]
     }
     assert _parse_votes(entry) == 0
+
+
+def test_parse_votes_prefers_feed_metadata():
+    entry = {
+        "ozb_meta": {"votes-pos": "42", "votes-neg": "3"},
+        "summary": "This deal has 1 vote in the blurb.",
+    }
+    assert _parse_votes(entry) == 42
+
+
+def test_node_id_uses_the_node_link_not_the_guid():
+    from src.fetchers.ozbargain import _node_id
+
+    assert _node_id({
+        "link": "https://www.ozbargain.com.au/node/976449",
+        "id": "976449 at https://www.ozbargain.com.au",
+    }) == "976449"
+
+
+def test_offer_ignores_zero_dollar_delivery():
+    from src.fetchers.ozbargain import _parse_offer_from_title
+
+    sale, original, discount = _parse_offer_from_title(
+        "Hugo Boss Bottled 100ml $54.99 (RRP $155) +Delivery ($0 Prime/$59 Spend) @ Amazon AU"
+    )
+    assert sale == 54.99
+    assert original == 155
+    assert discount == 64.5
+
+
+def test_offer_was_price_and_paid_delivery():
+    from src.fetchers.ozbargain import _parse_offer_from_title
+
+    sale, original, discount = _parse_offer_from_title(
+        "Uniqlo Jacket $59.90 (Was $149.90, 60% off) + $7.95 Delivery ($0 C&C/ $75 Order) @ UNIQLO"
+    )
+    assert sale == 59.9
+    assert original == 149.9
+    assert discount == 60.0
+
+
+def test_click_and_collect_zero_inside_the_rrp_paren_is_not_the_price():
+    from src.fetchers.ozbargain import _parse_offer_from_title
+
+    sale, original, discount = _parse_offer_from_title(
+        "McLaren Vale Shiraz 12-Bottles $99 Delivered (RRP $264, $0 SA C&C) @ Bec Hardy Wines"
+    )
+    assert sale == 99
+    assert original == 264
+    assert discount == 62.5
+
+
+def test_delivery_zero_is_not_a_freebie():
+    from src.fetchers.ozbargain import _is_freebie
+
+    title = "Google Fitbit Air $199 + Delivery ($0 C&C/ In-Store) @ The Good Guys"
+    assert _is_freebie(title, "", []) is False
+
+
+def test_free_shipping_is_not_a_freebie():
+    from src.fetchers.ozbargain import _is_freebie
+
+    assert _is_freebie("Coffee Beans $39.95 + Free Shipping @ Manna Beans", "", []) is False
+
+
+def test_real_freebie_title():
+    from src.fetchers.ozbargain import _is_freebie
+
+    assert _is_freebie("[iOS] Free: Castlevania @ Apple App Store", "free returns", []) is True
+
+
+def test_contract_handset_is_not_a_freebie():
+    from src.fetchers.ozbargain import _is_contract, _is_freebie
+
+    title = "Pixel 11 Pro 256GB $0 with Optus $69/M 24-Month SIM Only Plan @ Harvey Norman"
+    assert _is_contract(title) is True
+    assert _is_freebie(title, "", []) is False
+
+
+def test_short_number_keyword_must_be_in_the_title():
+    from src.fetchers.ozbargain import _matches_search_queries
+
+    assert _matches_search_queries("Shokz OpenFit Air", "includes 2 year warranty") is False
+    assert _matches_search_queries("Shokz OpenFit 2", "standard warranty") is True
+    assert _matches_search_queries("Shokz OpenFit 2", "refurbished stock") is False
+    assert _matches_search_queries("Shokz OpenFit Air 2 year warranty", "") is False
+    assert _matches_search_queries("Beats Powerbeats Pro 2, 2 year warranty", "") is True
+    assert _matches_search_queries("Leaf blower kit", "") is True
+    assert _matches_search_queries("Line trimmer", "") is True
+    assert _matches_search_queries("Whipper snipper", "") is True
+    assert _matches_search_queries("Snow leaf blower", "") is False
+
+
+def test_fetcher_reads_votes_price_and_merchant_url(monkeypatch):
+    from src.fetchers.ozbargain import OzBargainFetcher
+
+    entry = {
+        "title": "Shokz OpenFit 2 $80 (RRP $200) + Delivery ($0 C&C) @ Amazon AU",
+        "link": "https://www.ozbargain.com.au/node/42",
+        "id": "42 at https://www.ozbargain.com.au",
+        "summary": "<p>Open ear headphones.</p>",
+        "tags": [],
+        "published": "Fri, 25 Sep 2026 20:22:07 +1000",
+        "ozb_meta": {
+            "votes-pos": "12",
+            "votes-neg": "1",
+            "url": "https://www.amazon.com.au/dp/SHOZ2",
+        },
+    }
+    feed = type("Feed", (), {"bozo": False, "entries": [entry], "bozo_exception": None})()
+    monkeypatch.setattr("src.fetchers.ozbargain._get_ozbargain_feed", lambda: feed)
+
+    deals = OzBargainFetcher().fetch()
+    assert len(deals) == 1
+    deal = deals[0]
+    assert deal.id == "ozb_42"
+    assert deal.sale_price == 80
+    assert deal.original_price == 200
+    assert deal.discount_pct == 60
+    assert deal.votes == 12
+    assert deal.community_validated is True
+    assert deal.merchant_url == "https://www.amazon.com.au/dp/SHOZ2"
+    assert "<p>" not in deal.description
+
+
+def test_zero_delivery_title_is_not_a_freebie_even_with_lots_of_votes(monkeypatch):
+    from src.fetchers.ozbargain import OzBargainFreebieFetcher
+
+    entry = {
+        "title": "Google Fitbit Air $199 + Delivery ($0 C&C/ In-Store) @ The Good Guys",
+        "link": "https://www.ozbargain.com.au/node/973284",
+        "id": "973284 at https://www.ozbargain.com.au",
+        "summary": "<p>A tracker.</p>",
+        "tags": [],
+        "published": "",
+        "ozb_meta": {"votes-pos": "40", "url": "https://www.thegoodguys.com.au/fitbit"},
+    }
+    feed = type("Feed", (), {"bozo": False, "entries": [entry]})()
+    monkeypatch.setattr("src.fetchers.ozbargain._get_ozbargain_feed", lambda: feed)
+    assert OzBargainFreebieFetcher().fetch() == []

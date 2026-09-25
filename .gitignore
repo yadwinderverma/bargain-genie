@@ -39,3 +39,6 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Interrupted cache writes
+*.tmp

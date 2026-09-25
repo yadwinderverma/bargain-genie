@@ -4,43 +4,56 @@ Adjust these settings to customise what deals you're looking for.
 """
 
 # --- Products to track ---
-# These are the specific products you want to monitor.
-# Be specific enough to avoid false matches (e.g. include model number/version).
+# One query is one product. Every keyword must appear, and a 1-2 digit model
+# number has to sit next to another keyword (so "2 year warranty" does not match).
+_GARDEN_PARTS = [
+    "blade", "cover", "part", "catch", "catcher", "oil", "spark plug", "filter",
+]
+
 SEARCH_QUERIES = [
     {
         "keywords": ["beats", "powerbeats", "pro", "2"],
-        "exclude": ["case", "cover", "tip", "cable"]
+        "exclude": ["case", "cover", "tip", "cable"],
     },
     {
         "keywords": ["shokz", "openfit", "2"],
-        "exclude": ["case", "cover"]
+        "exclude": ["case", "cover"],
     },
     {
         "keywords": ["bose", "ultra", "open", "earbuds"],
-        "exclude": ["case", "cover"]
+        "exclude": ["case", "cover"],
     },
     {
         "keywords": ["airpods", "pro"],
-        "exclude": ["case", "cover", "tip"]
+        "exclude": ["case", "cover", "tip"],
     },
     {
         "keywords": ["lawn", "mower"],
-        "exclude": ["blade", "cover", "part", "catch", "oil", "spark plug", "filter"]
+        "exclude": _GARDEN_PARTS,
     },
     {
-        "keywords": ["lawn", "mower", "blower", "trimmer"],
-        "exclude": ["blade", "cover", "part", "catch", "oil", "spark plug", "filter"]
-    }
+        "keywords": ["leaf", "blower"],
+        "exclude": ["snow", *_GARDEN_PARTS],
+    },
+    {
+        "keywords": ["line", "trimmer"],
+        "exclude": _GARDEN_PARTS,
+    },
+    {
+        "keywords": ["whipper", "snipper"],
+        "exclude": _GARDEN_PARTS,
+    },
 ]
 
 # --- Global Excludes ---
 # These keywords will be excluded globally from all search query matching
 # to prevent refurbished, used, replica, or single replacement parts alerts.
 GLOBAL_EXCLUDES = [
-    "refurbished", "refurb", "renewed", "used", "pre-owned", "grade a", "grade b", 
-    "ex-demo", "second hand", "replica", "copy", "clone", "compatible", "fake", 
-    "non-genuine", "replacement", "left earbud", "right earbud", "single", "earbud only", 
-    "charging case only", "replacement case", "left only", "right only"
+    "refurbished", "refurb", "renewed", "used", "pre-owned", "grade a", "grade b",
+    "ex-demo", "second hand", "replica", "copy", "clone", "compatible", "fake",
+    "non-genuine", "replacement", "left earbud", "right earbud", "single earbud",
+    "single airpod", "earbud only", "charging case only", "replacement case",
+    "left only", "right only",
 ]
 
 # Verify price by crawling the direct retailer landing page before alerting
@@ -67,9 +80,9 @@ OZBARGAIN_MIN_VOTES_TRUSTED = 5 # Votes needed for the trust boost
 
 # --- Serper API Budget ---
 # Free tier = 2500 searches/month.
-# We use 1 Shopping search per product per run = len(SEARCH_QUERIES) × 2 runs/day.
-# With 3 products that's ~180 calls/month — well within the free limit.
-# Do NOT add per-retailer searches — one Shopping call returns all retailers at once.
+# One Shopping search per query per run. Eight queries, twice a day, is about
+# 480 calls a month. Do not add a search per retailer; one Shopping call
+# already returns every retailer.
 SERPER_ENABLED = True           # Set False to disable Serper entirely and rely only on OzBargain
 
 # --- OzBargain RSS ---
@@ -77,10 +90,12 @@ OZBARGAIN_RSS_URL = "https://www.ozbargain.com.au/deals/feed"
 OZBARGAIN_MAX_ITEMS = 50
 
 # --- OzBargain Freebies ---
-# Freebies are in the main deals feed tagged as "freebie" — there's no separate feed.
-# We detect them by looking for free/freebie signals in the title/description.
+# Freebies are items in the main feed, not a separate feed.
+# '$0 C&C' and 'free shipping' are delivery terms, not freebies.
+# Matching the watchlist keeps a free game or a free lunch out of Slack.
 OZBARGAIN_FREEBIES_ENABLED = True
-OZBARGAIN_FREEBIES_MIN_VOTES = 20   # Higher bar — only well-upvoted freebies (avoids spam)
+OZBARGAIN_FREEBIES_MATCH_WATCHLIST = True
+OZBARGAIN_FREEBIES_MIN_VOTES = 20   # Higher bar, so a handful of upvotes is not enough
 
 # --- Cache ---
 CACHE_FILE = "data/deals_cache.json"

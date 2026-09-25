@@ -1,3 +1,4 @@
+import json
 import pytest
 from datetime import datetime, timedelta, timezone
 from freezegun import freeze_time
@@ -118,4 +119,46 @@ class TestDealCache(unittest.TestCase):
         cache = DealCache(cache_file="dummy_cache.json")
         result = cache._load_cache()
         self.assertEqual(result, {"deal_1": {"seen_at": "2023-01-01T00:00:00Z"}})
+
+
+def test_filter_does_not_record_deals_before_a_decision(tmp_path):
+    from src.models import Deal
+
+    path = tmp_path / "cache.json"
+    cache = DealCache(cache_file=str(path))
+    deal = Deal(id="new", source="ozbargain", title="New", url="https://example.com/new", sale_price=10)
+    assert [item.id for item in cache.filter_new_deals([deal])] == ["new"]
+    assert not path.exists()
+
+
+def test_legacy_cache_row_without_status_stays_settled(tmp_path):
+    from src.models import Deal
+
+    path = tmp_path / "cache.json"
+    seen = datetime.now(timezone.utc).isoformat()
+    path.write_text(
+        json.dumps({"old": {"seen_at": seen, "title": "Old", "source": "ozbargain"}}),
+        encoding="utf-8",
+    )
+    cache = DealCache(cache_file=str(path))
+    deal = Deal(id="old", source="ozbargain", title="Old", url="https://example.com/old", sale_price=10)
+    assert cache.filter_new_deals([deal]) == []
+
+
+def test_rejected_deal_stays_hidden_until_the_price_drops(tmp_path):
+    from src.models import Deal
+
+    cache = DealCache(cache_file=str(tmp_path / "cache.json"))
+    deal = Deal(id="d", source="kogan", title="Widget", url="https://example.com/d", sale_price=100)
+    cache.mark_deals_rejected([deal])
+    assert cache.filter_new_deals([deal]) == []
+
+    cheaper = Deal(id="d", source="kogan", title="Widget", url="https://example.com/d", sale_price=90)
+    assert [item.id for item in cache.filter_new_deals([cheaper])] == ["d"]
+
+
+def test_unreadable_timestamp_does_not_crash_the_purge():
+    cache = DealCache(cache_file="unused.json", max_age_days=7)
+    purged = cache._purge_old_entries({"bad": {"seen_at": "not-a-date", "title": "x"}})
+    assert "bad" in purged
 

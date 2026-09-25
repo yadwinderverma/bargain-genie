@@ -1,7 +1,7 @@
 feedparser==6.0.11
-requests==2.31.0
+requests==2.34.2
 beautifulsoup4==4.12.3
-lxml==5.2.2
 google-genai==1.10.0
 pydantic==2.7.1
 pytest==8.2.0
+freezegun==1.5.5
