@@ -1,10 +1,16 @@
 {
-  "ozb_976617": {
-    "seen_at": "2026-09-27T15:00:05.264737+00:00",
-    "title": "Ozito PXC 36V (2x18V) 410mm Brushless Lawn Mower Kit $229 @ Bunnings Warehouse (In-Store)",
+  "ozb_978945": {
+    "seen_at": "2026-10-14T14:54:06.060939+00:00",
+    "title": "Husqvarna Automower 405X $1,349.50 Delivered @ Husqvarna",
     "source": "ozbargain",
-    "status": "alerted",
-    "sale_price": 229.0,
-    "alerted": true
+    "status": "rejected",
+    "sale_price": 1349.5
+  },
+  "ozb_978966": {
+    "seen_at": "2026-10-14T14:54:06.434050+00:00",
+    "title": "Apple AirPods Pro 3 $319 (RRP $429) Delivered @ Amazon AU",
+    "source": "ozbargain",
+    "status": "rejected",
+    "sale_price": 319.0
   }
 }
