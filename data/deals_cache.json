@@ -20,5 +20,13 @@
     "status": "alerted",
     "sale_price": 319.0,
     "alerted": true
+  },
+  "ozb_979376": {
+    "seen_at": "2026-10-17T13:28:36.882524+00:00",
+    "title": "Ryobi 36V 46cm Brushless Lawn Mower 4.0Ah Kit RLM36X46BL $299 in-Store @ Bunnings Cannington, WA",
+    "source": "ozbargain",
+    "status": "alerted",
+    "sale_price": 299.0,
+    "alerted": true
   }
 }
