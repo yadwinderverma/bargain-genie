@@ -12,5 +12,13 @@
     "source": "ozbargain",
     "status": "rejected",
     "sale_price": 319.0
+  },
+  "ozb_979297": {
+    "seen_at": "2026-10-17T00:06:52.980444+00:00",
+    "title": "Apple AirPods Pro 3 $319 Delivered @ Hub by Triforce",
+    "source": "ozbargain",
+    "status": "alerted",
+    "sale_price": 319.0,
+    "alerted": true
   }
 }
