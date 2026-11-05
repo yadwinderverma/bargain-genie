@@ -1,32 +1,10 @@
 {
-  "ozb_978945": {
-    "seen_at": "2026-10-14T14:54:06.060939+00:00",
-    "title": "Husqvarna Automower 405X $1,349.50 Delivered @ Husqvarna",
-    "source": "ozbargain",
-    "status": "rejected",
-    "sale_price": 1349.5
-  },
-  "ozb_978966": {
-    "seen_at": "2026-10-14T14:54:06.434050+00:00",
-    "title": "Apple AirPods Pro 3 $319 (RRP $429) Delivered @ Amazon AU",
-    "source": "ozbargain",
-    "status": "rejected",
-    "sale_price": 319.0
-  },
-  "ozb_979297": {
-    "seen_at": "2026-10-17T00:06:52.980444+00:00",
-    "title": "Apple AirPods Pro 3 $319 Delivered @ Hub by Triforce",
+  "ozb_981790": {
+    "seen_at": "2026-11-05T17:51:56.036803+00:00",
+    "title": "RYOBI 36V HP Brushless 46cm Lawn Mower 4Ah Kit (R36LMW34) $428 w $100 Bunnings GC via Redemption Delivered / C&C @ Bunnings",
     "source": "ozbargain",
     "status": "alerted",
-    "sale_price": 319.0,
-    "alerted": true
-  },
-  "ozb_979376": {
-    "seen_at": "2026-10-17T13:28:36.882524+00:00",
-    "title": "Ryobi 36V 46cm Brushless Lawn Mower 4.0Ah Kit RLM36X46BL $299 in-Store @ Bunnings Cannington, WA",
-    "source": "ozbargain",
-    "status": "alerted",
-    "sale_price": 299.0,
+    "sale_price": 428.0,
     "alerted": true
   }
 }
