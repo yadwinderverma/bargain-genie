@@ -6,5 +6,12 @@
     "status": "alerted",
     "sale_price": 428.0,
     "alerted": true
+  },
+  "ozb_982644": {
+    "seen_at": "2026-11-11T17:43:19.021149+00:00",
+    "title": "AirPods Pro 3 Wireless Earbuds, Active Noise Cancellation $299 (RRP $429) Delivered @ Amazon AU",
+    "source": "ozbargain",
+    "status": "rejected",
+    "sale_price": 299.0
   }
 }
