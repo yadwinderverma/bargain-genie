@@ -1,17 +1,16 @@
 {
-  "ozb_981790": {
-    "seen_at": "2026-11-05T17:51:56.036803+00:00",
-    "title": "RYOBI 36V HP Brushless 46cm Lawn Mower 4Ah Kit (R36LMW34) $428 w $100 Bunnings GC via Redemption Delivered / C&C @ Bunnings",
-    "source": "ozbargain",
-    "status": "alerted",
-    "sale_price": 428.0,
-    "alerted": true
-  },
   "ozb_982644": {
     "seen_at": "2026-11-11T17:43:19.021149+00:00",
     "title": "AirPods Pro 3 Wireless Earbuds, Active Noise Cancellation $299 (RRP $429) Delivered @ Amazon AU",
     "source": "ozbargain",
     "status": "rejected",
     "sale_price": 299.0
+  },
+  "ozb_983149": {
+    "seen_at": "2026-11-14T16:23:35.241912+00:00",
+    "title": "Bose Ultra Open Earbuds (Black) $249 (RRP $449.95) Delivered @ Amazon AU",
+    "source": "ozbargain",
+    "status": "rejected",
+    "sale_price": 249.0
   }
 }
